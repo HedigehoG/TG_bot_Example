@@ -6,20 +6,20 @@
 
 # Пример для первого бота
 my-first-bot.your-domain.com {
-    reverse_proxy 127.0.0.1:3000
+    reverse_proxy 127.0.0.1:8001
 }
 
 # Пример для второго бота
 my-second-bot.your-domain.com {
-    reverse_proxy 127.0.0.1:3001
+    reverse_proxy 127.0.0.1:8002
 }
 
 # --- Вариант 2: Продвинутый с wildcard-сертификатом ---
 # Требует настройки DNS плагина в Caddy для получения wildcard-сертификата (*.your-domain.com).
 # *.your-domain.com {
 #     @bot1 host my-first-bot.your-domain.com
-#     handle @bot1 { reverse_proxy 127.0.0.1:3000 }
+#     handle @bot1 { reverse_proxy 127.0.0.1:8001 }
 #
 #     @bot2 host my-second-bot.your-domain.com
-#     handle @bot2 { reverse_proxy 127.0.0.1:3001 }
+#     handle @bot2 { reverse_proxy 127.0.0.1:8002 }
 # }

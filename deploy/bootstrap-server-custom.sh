@@ -7,6 +7,7 @@ set -euo pipefail
 BOOT_USER=${BOOT_USER:-deploy}
 REPO_NAME=${REPO_NAME:-tg-bot}
 BOT_NAME=${BOT_NAME:-bot_main}
+BOT_PORT=${BOT_PORT:-8001}
 OWNER=${OWNER:-} # This should be set from the command line
 
 if [ -z "${OWNER}" ]; then
@@ -87,10 +88,10 @@ cat > "${REPO_DIR}/hooks/post-receive" <<HOOK
 TARGET_DIR="${WORK_DIR}"
 GIT_DIR="${REPO_DIR}"
 
-echo "Deploying to ${TARGET_DIR}"
-mkdir -p ${TARGET_DIR}
-git --work-tree=${TARGET_DIR} --git-dir=${GIT_DIR} checkout -f
-cd ${TARGET_DIR} || exit
+echo "Deploying to \${TARGET_DIR}"
+mkdir -p "\${TARGET_DIR}"
+git --work-tree="\${TARGET_DIR}" --git-dir="\${GIT_DIR}" checkout -f
+cd "\${TARGET_DIR}" || exit
 
 docker compose -f docker-compose.prod.yml pull || true
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
@@ -107,7 +108,8 @@ if [ ! -f "${WORK_DIR}/.env" ]; then
 BOT_TOKEN=123456:ABC-DEF-YOUR_TOKEN
 # WEBHOOK_HOST должен указывать на уникальный поддомен для этого бота, например https://my-first-bot.your-domain.com
 WEBHOOK_HOST=https://${BOT_NAME}.example.com
-PORT=3000
+# Внутренний порт, на котором слушает приложение в контейнере. Он будет сопоставлен с BOT_PORT на хосте.
+PORT=8080
 ENV
   chown ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}/.env"
 fi
@@ -120,6 +122,8 @@ services:
     image: ghcr.io/${OWNER}/tg-webhook-bot:latest
     env_file:
       - .env
+    ports:
+      - "${BOT_PORT}:8080" # Проброс порта с хоста (BOT_PORT) в контейнер (8080)
     restart: unless-stopped
     # Ограничиваем использование памяти для защиты сервера
     mem_limit: 150m
