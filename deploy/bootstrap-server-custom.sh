@@ -14,6 +14,9 @@ if [ -z "${OWNER}" ]; then
   echo "Usage: sudo OWNER=your-github-username ./bootstrap-server-custom.sh"
   exit 1
 fi
+# Convert OWNER to lowercase to comply with Docker image naming conventions.
+OWNER=${OWNER,,}
+
 WORK_DIR=/opt/pybot/${BOT_NAME}
 
 echo "Custom bootstrap: WORK_DIR=${WORK_DIR}, USER=${BOOT_USER}, BOT_NAME=${BOT_NAME}"
@@ -102,7 +105,7 @@ if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
   cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
 services:
   bot:
-    image: ghcr.io/${OWNER,,}/tg-webhook-bot:latest
+    image: ghcr.io/${OWNER}/tg-webhook-bot:latest
     env_file:
       - .env
     ports:
