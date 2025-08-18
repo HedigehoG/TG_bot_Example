@@ -5,7 +5,6 @@
 set -euo pipefail
 
 BOOT_USER=${BOOT_USER:-deploy}
-REPO_NAME=${REPO_NAME:-tg-bot}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
 OWNER=${OWNER:-} # This should be set from the command line
@@ -15,10 +14,9 @@ if [ -z "${OWNER}" ]; then
   echo "Usage: sudo OWNER=your-github-username ./bootstrap-server-custom.sh"
   exit 1
 fi
-REPO_DIR=/opt/pybot/conf_git/${REPO_NAME}.git
 WORK_DIR=/opt/pybot/${BOT_NAME}
 
-echo "Custom bootstrap: REPO=${REPO_DIR}, WORK=${WORK_DIR}, USER=${BOOT_USER}"
+echo "Custom bootstrap: WORK_DIR=${WORK_DIR}, USER=${BOOT_USER}, BOT_NAME=${BOT_NAME}"
 
 # install docker (same as generic)
 if ! command -v docker >/dev/null 2>&1; then
@@ -85,35 +83,8 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
 fi
 
 # create layout and permissions
-mkdir -p /opt/pybot/conf_git
 mkdir -p "${WORK_DIR}"
 chown -R ${BOOT_USER}:${BOOT_USER} /opt/pybot || true
-
-# init bare repo
-if [ ! -d "${REPO_DIR}/refs" ]; then
-  git init --bare "${REPO_DIR}"
-fi
-
-# create post-receive hook tailored
-cat > "${REPO_DIR}/hooks/post-receive" <<HOOK
-#!/bin/bash
-# post-receive for ${BOT_NAME}
-TARGET_DIR="${WORK_DIR}"
-GIT_DIR="${REPO_DIR}"
-
-echo "Deploying to \${TARGET_DIR}"
-mkdir -p "\${TARGET_DIR}"
-git --work-tree="\${TARGET_DIR}" --git-dir="\${GIT_DIR}" checkout -f main
-cd "\${TARGET_DIR}" || exit
-
-docker compose -f docker-compose.prod.yml pull || true
-docker compose -f docker-compose.prod.yml up -d --remove-orphans
-
-echo "Deployed ${BOT_NAME}"
-HOOK
-
-chmod +x "${REPO_DIR}/hooks/post-receive"
-chown -R ${BOOT_USER}:${BOOT_USER} "${REPO_DIR}"
 
 # sample env and compose
 if [ ! -f "${WORK_DIR}/.env" ]; then
@@ -152,6 +123,6 @@ fi
 
 echo "Custom bootstrap completed."
 echo "IMPORTANT: Add the private key displayed above to your GitHub repo secrets as SSH_PRIVATE_KEY."
-echo "1. Edit secrets in ${WORK_DIR}/.env"
-echo "2. Add remote to your local git repo: git remote add live ssh://${BOOT_USER}@$(hostname -f)${REPO_DIR}"
-echo "3. Push to deploy: git push live main"
+echo "Next steps:"
+echo "1. Edit secrets in ${WORK_DIR}/.env with your BOT_TOKEN and other values."
+echo "2. Push your code to the 'main' branch on GitHub to trigger the deployment."
