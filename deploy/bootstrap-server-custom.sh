@@ -50,6 +50,19 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
   chown -R ${BOOT_USER}:${BOOT_USER} "${SSH_DIR}"
   echo "SSH directory for ${BOOT_USER} created."
 
+  # Ensure PubkeyAuthentication is enabled in sshd_config and restart sshd.
+  # This is crucial for the deployment key to work.
+  if grep -qE '^\s*#?\s*PubkeyAuthentication' /etc/ssh/sshd_config; then
+    sed -i -E 's/^\s*#?\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+  else
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+  fi
+  if grep -qE '^\s*#?\s*PasswordAuthentication' /etc/ssh/sshd_config; then
+    sed -i -E 's/^\s*#?\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  fi
+  systemctl restart sshd
+  echo "SSH server reconfigured to accept public key authentication."
+
   # Generate a new SSH key pair for deployment
   echo "Generating a new SSH key for deployment..."
   KEY_PATH="${SSH_DIR}/id_ed25519_deploy"
