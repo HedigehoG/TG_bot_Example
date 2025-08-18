@@ -1,0 +1,25 @@
+# Пример конфигурации Caddyfile для маршрутизации через поддомены.
+# Этот файл нужно разместить на сервере (обычно в /etc/caddy/Caddyfile).
+
+# --- Вариант 1: Простая конфигурация (рекомендуется) ---
+# Для каждого бота требуется своя DNS A-запись, указывающая на IP вашего сервера.
+
+# Пример для первого бота
+my-first-bot.your-domain.com {
+    reverse_proxy 127.0.0.1:3000
+}
+
+# Пример для второго бота
+my-second-bot.your-domain.com {
+    reverse_proxy 127.0.0.1:3001
+}
+
+# --- Вариант 2: Продвинутый с wildcard-сертификатом ---
+# Требует настройки DNS плагина в Caddy для получения wildcard-сертификата (*.your-domain.com).
+# *.your-domain.com {
+#     @bot1 host my-first-bot.your-domain.com
+#     handle @bot1 { reverse_proxy 127.0.0.1:3000 }
+#
+#     @bot2 host my-second-bot.your-domain.com
+#     handle @bot2 { reverse_proxy 127.0.0.1:3001 }
+# }

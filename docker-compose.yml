@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  bot:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - botnet
+    # limit memory usage
+    mem_limit: 150m
+
+networks:
+  botnet:
+    driver: bridge
