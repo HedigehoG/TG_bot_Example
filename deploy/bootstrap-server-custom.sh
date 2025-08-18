@@ -103,7 +103,7 @@ GIT_DIR="${REPO_DIR}"
 
 echo "Deploying to \${TARGET_DIR}"
 mkdir -p "\${TARGET_DIR}"
-git --work-tree="\${TARGET_DIR}" --git-dir="\${GIT_DIR}" checkout -f
+git --work-tree="\${TARGET_DIR}" --git-dir="\${GIT_DIR}" checkout -f main
 cd "\${TARGET_DIR}" || exit
 
 docker compose -f docker-compose.prod.yml pull || true
@@ -129,10 +129,9 @@ fi
 
 if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
   cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
-version: '3.8'
 services:
   bot:
-    image: ghcr.io/${OWNER}/tg-webhook-bot:latest
+    image: ghcr.io/${OWNER,,}/tg-webhook-bot:latest
     env_file:
       - .env
     ports:

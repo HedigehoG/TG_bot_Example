@@ -77,7 +77,9 @@ git push production main
 
 Проект содержит workflow для автоматической сборки и публикации Docker-образа в GitHub Container Registry (GHCR).
 
-1) В `deploy/docker-compose.prod.yml` замените `<OWNER>` на ваш GitHub username или organization.
+1) Убедитесь, что ваш GitHub Actions workflow (в `.github/workflows/`) собирает и публикует Docker-образ в правильный репозиторий GHCR. Имя образа должно соответствовать тому, что используется в `docker-compose.prod.yml` на сервере.
+   - Bootstrap-скрипт автоматически создаст `docker-compose.prod.yml` с именем образа `ghcr.io/<owner>/tg-webhook-bot:latest`, где `<owner>` — это ваш GitHub-логин, приведенный к нижнему регистру (из переменной `OWNER`).
+   - Ваш workflow должен публиковать образ именно по этому пути.
 
 2) В репозитории GitHub добавьте secrets (Settings → Secrets → Actions):
 - `SSH_HOST` — IP или домен вашего сервера
