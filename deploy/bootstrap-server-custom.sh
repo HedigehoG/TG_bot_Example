@@ -8,14 +8,21 @@ BOOT_USER=${BOOT_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
 OWNER=${OWNER:-} # This should be set from the command line
+REPO_NAME=${REPO_NAME:-} # This should be set from the command line
 
 if [ -z "${OWNER}" ]; then
   echo "Error: GitHub username is not set. Please provide it via the OWNER environment variable."
-  echo "Usage: sudo OWNER=your-github-username ./bootstrap-server-custom.sh"
+  echo "Usage: sudo OWNER=your-github-username REPO_NAME=your-repo-name ./bootstrap-server-custom.sh"
+  exit 1
+fi
+if [ -z "${REPO_NAME}" ]; then
+  echo "Error: GitHub repository name is not set. Please provide it via the REPO_NAME environment variable."
+  echo "Usage: sudo OWNER=your-github-username REPO_NAME=your-repo-name ./bootstrap-server-custom.sh"
   exit 1
 fi
 # Convert OWNER to lowercase to comply with Docker image naming conventions.
 OWNER=${OWNER,,}
+REPO_NAME=${REPO_NAME,,}
 
 WORK_DIR=/opt/pybot/${BOT_NAME}
 
@@ -74,20 +81,24 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
   chown -R ${BOOT_USER}:${BOOT_USER} "${SSH_DIR}"
   echo "Deployment key generated and authorized."
 
-  echo "----------------------------------------------------------------"
-  echo "ВАЖНО! СКОПИРУЙТЕ ЭТОТ ПРИВАТНЫЙ КЛЮЧ И СОХРАНИТЕ ЕГО."
-  echo "Он понадобится для GitHub Actions (секрет SSH_PRIVATE_KEY)."
-  echo "После закрытия этого окна ключ будет удален с сервера."
-  echo "----------------------------------------------------------------"
+  echo "====================== GitHub Actions Secrets ======================"
+  echo "Add the following secrets to your GitHub repository settings:"
+  echo "--------------------------------------------------------------------"
+  echo "SSH_HOST: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+  echo "SSH_USER: ${BOOT_USER}"
+  echo "WORK_DIR: ${WORK_DIR}"
+  echo "---------------------- SSH_PRIVATE_KEY (copy all) ------------------"
   cat "${KEY_PATH}"
-  echo "----------------------------------------------------------------"
+  echo "===================================================================="
   # Securely remove the private key from the server after displaying it
   rm -f "${KEY_PATH}"
 fi
 
 # create layout and permissions
-mkdir -p "${WORK_DIR}"
-chown -R ${BOOT_USER}:${BOOT_USER} /opt/pybot || true
+if [ ! -d "${WORK_DIR}" ]; then
+    mkdir -p "${WORK_DIR}"
+    chown -R ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}"
+fi
 
 # sample env and compose
 if [ ! -f "${WORK_DIR}/.env" ]; then
@@ -105,7 +116,7 @@ if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
   cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
 services:
   bot:
-    image: ghcr.io/${OWNER}/tg-webhook-bot:latest
+    image: ghcr.io/${OWNER}/${REPO_NAME}:latest
     env_file:
       - .env
     ports:
@@ -124,8 +135,8 @@ YML
   chown ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}/docker-compose.prod.yml"
 fi
 
-echo "Custom bootstrap completed."
-echo "IMPORTANT: Add the private key displayed above to your GitHub repo secrets as SSH_PRIVATE_KEY."
+echo "Bootstrap completed."
 echo "Next steps:"
-echo "1. Edit secrets in ${WORK_DIR}/.env with your BOT_TOKEN and other values."
-echo "2. Push your code to the 'main' branch on GitHub to trigger the deployment."
+echo "1. Ensure you have added the secrets above to your GitHub repository."
+echo "2. Edit the placeholder values in ${WORK_DIR}/.env on the server."
+echo "3. Push to the 'main' branch to trigger the deployment."

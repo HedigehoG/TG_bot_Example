@@ -86,7 +86,7 @@ docker-compose up --build -d
     1. GitHub Actions собирает Docker-образ и публикует его в GHCR.
     2. После успешной публикации workflow по SSH подключается к серверу и выполняет `docker-compose pull && docker-compose up -d` в рабочей директории.
 
-    Необходимые secrets в GitHub:
+    Необходимые secrets в GitHub actions:
     - `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `WORK_DIR` (и, при необходимости, `GHCR_TOKEN` для публикации образа).
 
     ## Структура директорий (локально / на сервере)
