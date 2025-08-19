@@ -1,71 +1,59 @@
-name: Build and Deploy
+name: Debug Secrets
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
-  build-and-push-image:
+  debug-secrets:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      image_name: ${{ steps.meta.outputs.tags }}
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/tg-webhook-bot
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  deploy:
-    needs: build-and-push-image
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Debug secrets
+      - name: Check SSH_HOST
         run: |
-          echo "SSH_HOST (second half): ${SSH_HOST:${#SSH_HOST}/2}"
-          echo "SSH_USER (second half): ${SSH_USER:${#SSH_USER}/2}"
-          echo "WORK_DIR (second half): ${WORK_DIR:${#WORK_DIR}/2}"
-          echo "SSH_PRIVATE_KEY length: ${#SSH_PRIVATE_KEY}"
+          if [ -z "${SSH_HOST}" ]; then
+            echo "❌ SSH_HOST is empty"
+            exit 1
+          else
+            echo "✅ SSH_HOST is set (length: ${#SSH_HOST})"
+            echo "Second half: ${SSH_HOST:${#SSH_HOST}/2}"
+          fi
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
+
+      - name: Check SSH_USER
+        run: |
+          if [ -z "${SSH_USER}" ]; then
+            echo "❌ SSH_USER is empty"
+            exit 1
+          else
+            echo "✅ SSH_USER is set (length: ${#SSH_USER})"
+            echo "Second half: ${SSH_USER:${#SSH_USER}/2}"
+          fi
+        env:
           SSH_USER: ${{ secrets.SSH_USER }}
+
+      - name: Check WORK_DIR
+        run: |
+          if [ -z "${WORK_DIR}" ]; then
+            echo "❌ WORK_DIR is empty"
+            exit 1
+          else
+            echo "✅ WORK_DIR is set (length: ${#WORK_DIR})"
+            echo "Second half: ${WORK_DIR:${#WORK_DIR}/2}"
+          fi
+        env:
           WORK_DIR: ${{ secrets.WORK_DIR }}
+
+      - name: Check SSH_PRIVATE_KEY length
+        run: |
+          if [ -z "${SSH_PRIVATE_KEY}" ]; then
+            echo "❌ SSH_PRIVATE_KEY is empty"
+            exit 1
+          else
+            echo "✅ SSH_PRIVATE_KEY is set (length: ${#SSH_PRIVATE_KEY})"
+          fi
+        env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ${{ secrets.WORK_DIR }}
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            echo "Deployment successful"
+
+
+          
