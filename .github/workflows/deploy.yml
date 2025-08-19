@@ -46,6 +46,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
+      - name: Debug secrets
+        run: |
+          echo "SSH_HOST (second half): ${SSH_HOST:${#SSH_HOST}/2}"
+          echo "SSH_USER (second half): ${SSH_USER:${#SSH_USER}/2}"
+          echo "WORK_DIR (second half): ${WORK_DIR:${#WORK_DIR}/2}"
+          echo "SSH_PRIVATE_KEY length: ${#SSH_PRIVATE_KEY}"
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          WORK_DIR: ${{ secrets.WORK_DIR }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
