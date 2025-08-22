@@ -133,6 +133,10 @@ services:
     # Ограничиваем использование памяти для защиты сервера
     mem_limit: 150m
     memswap_limit: 300m
+    # Явно указываем DNS-серверы для надежного разрешения имен внутри контейнера.
+    # Это решает проблему "Temporary failure in name resolution".
+    dns:
+      - 8.8.8.8
     networks:
       - botnet
 
