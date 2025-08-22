@@ -87,10 +87,15 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
   echo "SSH_HOST: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
   echo "SSH_USER: ${BOOT_USER}"
   echo "WORK_DIR: ${WORK_DIR}"
-  echo "---------------------- SSH_PRIVATE_KEY (copy all) ------------------"
+  echo "---------------------- SSH_PRIVATE_KEY (copy all below) ------------------"
   echo "" # Add a blank line for easier copying
   cat "${KEY_PATH}"
   echo "" # Add a blank line for easier copying
+  echo "---------------------- SSH_PUBLIC_KEY (for debugging) --------------------"
+  echo "Add this as a GitHub secret named SSH_PUBLIC_KEY. It helps verify the private key."
+  echo ""
+  cat "${KEY_PATH}.pub"
+  echo ""
   echo "===================================================================="
   # Securely remove the private key from the server after displaying it
   # We are commenting this line out to prevent issues with incorrectly copied keys.

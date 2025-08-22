@@ -54,8 +54,29 @@ jobs:
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       WORK_DIR: ${{ secrets.WORK_DIR }}
+      # Публичный ключ для верификации. Не обязателен для деплоя, но помогает в отладке.
+      SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
 
     steps:
+      - name: Verify SSH keys
+        # Этот шаг проверяет, что приватный ключ в секретах соответствует публичному.
+        # Это помогает выявить ошибки копирования ключей в секреты GitHub.
+        run: |
+          if [ -z "${{ env.SSH_PRIVATE_KEY }}" ]; then echo "Error: SSH_PRIVATE_KEY secret is not set." >&2; exit 1; fi
+          if [ -n "${{ env.SSH_PUBLIC_KEY }}" ]; then
+            echo "Verifying that the public key matches the private key..."
+            echo "${{ env.SSH_PRIVATE_KEY }}" > private_key.pem
+            chmod 600 private_key.pem
+            GENERATED_PUB_KEY_DATA=$(ssh-keygen -y -f private_key.pem | awk '{print $1, $2}')
+            SECRET_PUB_KEY_DATA=$(echo "${{ env.SSH_PUBLIC_KEY }}" | awk '{print $1, $2}')
+            if [ "$GENERATED_PUB_KEY_DATA" == "$SECRET_PUB_KEY_DATA" ]; then
+              echo "SSH key pair is valid."
+            else
+              echo "Error: Mismatch between private and public key! Please check your GitHub secrets." >&2
+              echo "This usually happens due to a copy-paste error." >&2
+              exit 1
+            fi
+          fi
       - name: Add server fingerprint to known_hosts
         run: |
           mkdir -p ~/.ssh
