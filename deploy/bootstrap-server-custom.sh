@@ -121,7 +121,8 @@ if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
   cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
 services:
   bot:
-    image: ghcr.io/${GITHUB_REPOSITORY}:latest
+    # Имя образа будет передаваться через переменную окружения BOT_IMAGE во время деплоя
+    image: ${BOT_IMAGE:-ghcr.io/${GITHUB_REPOSITORY}:latest}
     env_file:
       - .env
     ports:

@@ -54,6 +54,7 @@ jobs:
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       WORK_DIR: ${{ secrets.WORK_DIR }}
+      IMAGE_NAME: ${{ needs.build-and-push-image.outputs.image_name }}
 
     steps:
       - name: Add server fingerprint to known_hosts
@@ -69,14 +70,19 @@ jobs:
           key: ${{ env.SSH_PRIVATE_KEY }}
           script: |
             cd ${{ env.WORK_DIR }}
-            # Логинимся в GitHub Container Registry для скачивания приватного образа
+
+            # Устанавливаем переменную окружения с точным именем образа из шага сборки
+            export BOT_IMAGE="${{ env.IMAGE_NAME }}"
+            echo "Attempting to deploy image: $BOT_IMAGE"
+
+            # Логинимся в GitHub Container Registry
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Скачиваем последнюю версию образа и перезапускаем контейнер
+            # Скачиваем образ, используя переменную окружения, и перезапускаем сервис
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             
-            # Очищаем старые, неиспользуемые образы Docker для экономии места
+            # Очищаем старые образы
             docker image prune -af
 
             echo "Deployment successful"
