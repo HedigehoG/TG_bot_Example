@@ -67,6 +67,7 @@ jobs:
           host: ${{ env.SSH_HOST }}
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_PRIVATE_KEY }}
+          port: ${{ env.PORT }}
           script: |
             cd ${{ env.WORK_DIR }}
             # Логинимся в GitHub Container Registry для скачивания приватного образа
