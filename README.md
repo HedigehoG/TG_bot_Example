@@ -1,126 +1,106 @@
 # tg-webhook-bot (Python + aiogram)
 
-Это готовый шаблон для Telegram-бота на **Python**, **aiogram** и **aiohttp**. Он работает через вебхуки и оптимизирован для простого и безопасного развертывания на сервере с помощью Docker и GitHub Actions.
+Готовый шаблон для Telegram-бота на **Python**, **aiogram** и **aiohttp**. Бот работает через вебхуки и оптимизирован для простого и безопасного развертывания на сервере с помощью Docker и GitHub Actions.
 
-### Стек
-- **Бот**: Python + aiogram + aiohttp
-- **Деплой**: Docker + Docker Compose + GitHub Actions
+## Стек технологий
+
+- **Бот**: Python 3.11, aiogram, aiohttp
+- **Деплой**: Docker, Docker Compose, GitHub Actions
 - **Веб-сервер (рекомендуется)**: Caddy для автоматического HTTPS
 
-### Локальная разработка
+## Что внутри репозитория
 
-1.  Скопируйте `.env.example` в новый файл `.env`.
-2.  Укажите в нем `BOT_TOKEN`, `WEBHOOK_HOST` и `PORT`.
-3.  Запустите локально для проверки через Docker:
+- `bot.py`: Основной код бота.
+- `Dockerfile`: Инструкции для сборки Docker-образа.
+- `docker-compose.yml`: Конфигурация для локального запуска и тестирования.
+- `deploy/`: Каталог со скриптами для развертывания:
+  - `bootstrap-server-custom.sh`: Скрипт для первоначальной настройки сервера.
+  - `Caddyfile.example`: Пример конфигурации для веб-сервера Caddy.
+
+## Как это работает: CI/CD с GitHub Actions
+
+Этот шаблон настроен на автоматическое развертывание при пуше в ветку `main`:
+
+1.  **Push в `main`**: Запускается workflow в GitHub Actions.
+2.  **Сборка и публикация образа**: GitHub Actions собирает Docker-образ вашего бота и публикует его в GitHub Container Registry (GHCR).
+3.  **Деплой на сервер**: Workflow подключается к вашему серверу по SSH и выполняет команду `docker-compose pull && docker-compose up -d`, чтобы обновить и запустить бота с новым образом.
+
+## Шаг 1: Настройка сервера
+
+Для развертывания бота вам понадобится сервер (VPS/VDS) с публичным IP-адресом. Скрипт `deploy/bootstrap-server-custom.sh` поможет быстро подготовить его.
+
+**Что делает скрипт:**
+- Устанавливает Docker и Docker Compose.
+- Создает специального пользователя для деплоя (например, `deploy`).
+- Генерирует SSH-ключ для беспарольного доступа с GitHub Actions.
+- Создает структуру каталогов для бота в `/opt/pybot/<BOT_NAME>`.
+- Генерирует файлы `.env` и `docker-compose.prod.yml`.
+
+**Запуск скрипта на сервере:**
+
+Скрипт можно запустить одной командой прямо с GitHub, не скачивая репозиторий на сервер.
+
+> **Примечание:** Для выполнения первоначальной настройки сервера (установка Docker, создание пользователя) требуются права `sudo`.
+
+Выполните на сервере следующие команды, подставив свои значения:
 
 ```bash
-docker-compose up --build -d
+# 1. Задайте переменные
+OWNER="your-github-username"      # Ваш логин на GitHub
+REPO_NAME="your-repo-name"        # Название вашего репозитория на GitHub
+BOT_NAME="bot_main"               # Имя для каталога бота на сервере
+BOT_PORT="8001"                   # Порт на хосте, который будет слушать бот
+DEPLOY_USER="deploy"              # Имя пользователя для деплоя (опционально, по умолчанию 'deploy')
+
+# 2. Запустите скрипт с GitHub
+sudo env OWNER=$OWNER REPO_NAME=$REPO_NAME BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT DEPLOY_USER=$DEPLOY_USER \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/main/deploy/bootstrap-server-custom.sh)"
 ```
 
-### Настройка Caddy на сервере
+После выполнения скрипт выведет **секреты, которые нужно добавить в ваш репозиторий на GitHub** (`Settings -> Secrets and variables -> Actions`):
+- `SSH_HOST`: IP-адрес вашего сервера.
+- `SSH_USER`: Пользователь, созданный скриптом (`deploy` по умолчанию).
+- `SSH_PRIVATE_KEY`: Закрытый SSH-ключ для доступа к серверу.
+- `WORK_DIR`: Рабочий каталог на сервере (например, `/opt/pybot/bot_main`).
 
-Для маршрутизации запросов к ботам мы будем использовать поддомены (например, `my-bot.your-domain.com`). Это более чистый и гибкий подход, чем маршрутизация по URL.
+> **Важно:** После выполнения скрипта не забудьте отредактировать файл `.env` на сервере (`/opt/pybot/<BOT_NAME>/.env`) и указать ваш настоящий `BOT_TOKEN` и `WEBHOOK_HOST`.
 
-**Что нужно сделать:**
-1.  **Настроить DNS:** У вашего регистратора доменов создайте `A`-запись для каждого бота, которая будет указывать на IP-адрес вашего сервера.
+## Шаг 2: Настройка DNS и Caddy (HTTPS)
+
+Чтобы Telegram мог отправлять обновления на ваш вебхук, ему нужен HTTPS. Мы рекомендуем использовать Caddy — он автоматически получает и обновляет SSL-сертификаты.
+
+1.  **Настройте DNS**: Создайте `A`-запись для вашего домена (или поддомена), которая будет указывать на IP-адрес вашего сервера.
     - `my-first-bot.your-domain.com` -> `SERVER_IP`
-    # tg-webhook-bot (Python + aiogram)
+2.  **Настройте Caddy**: Используйте `deploy/Caddyfile.example` как шаблон. Скопируйте его содержимое в `/etc/caddy/Caddyfile` на сервере и адаптируйте под свой домен и порт.
+    ```
+    my-first-bot.your-domain.com {
+        reverse_proxy localhost:8001 # Укажите порт (BOT_PORT) вашего бота
+    }
+    ```
+3.  **Перезапустите Caddy**: `sudo systemctl reload caddy`.
 
-    Коротко: шаблон Telegram-бота на Python с поддержкой вебхуков, готовый к запуску в Docker и к деплою через GitHub Actions + простая интеграция с Caddy для HTTPS.
+## Локальная разработка и тестирование
 
-    ## Что внутри
-    - Код бота: `bot.py` (aiohttp + aiogram)
-    - Docker + `docker-compose.yml` для локального запуска
-    - Скрипты и примеры для продакшен-деплоя в каталоге `deploy/` (`bootstrap-server-custom.sh`, `Caddyfile.example`, `docker-compose.prod.yml` генерируется скриптом)
+Поскольку бот работает через вебхуки, для локального тестирования ему нужен публично доступный адрес. Просто запустить `docker-compose up` недостаточно.
 
-    ## Быстрый старт (локально)
-    1. Скопируйте (если есть) `.env.example` в `.env` и заполните переменные: `BOT_TOKEN`, `WEBHOOK_HOST`, `PORT`.
-    2. Соберите и запустите контейнеры:
+Рекомендуемый способ — использовать **ngrok** или аналогичный сервис для создания временного публичного URL.
 
-    ```powershell
+1.  Скопируйте `.env.example` в `.env` (если его нет).
+2.  Запустите ngrok, чтобы получить публичный URL, который будет перенаправлять трафик на ваш локальный порт:
+    ```bash
+    # Если ваше приложение слушает порт 8080
+    ngrok http 8080
+    ```
+3.  Скопируйте HTTPS-адрес, который выдал ngrok (например, `https://xxxx-xxxx.ngrok-free.app`), и вставьте его в `WEBHOOK_HOST` в вашем `.env` файле.
+4.  Укажите `BOT_TOKEN` и `PORT` (например, `8080`).
+5.  Теперь можно запустить бота локально:
+    ```bash
     docker-compose up --build
     ```
+6.  Смотрите логи: `docker-compose logs -f`.
 
-    3. Проверьте логи контейнера, чтобы убедиться, что бот инициализировался и вебхук установлен.
+## Troubleshooting
 
-    Если хотите тестировать без внешнего хоста, можно использовать ngrok/LocalTunnel и указать публичный URL в `WEBHOOK_HOST`.
-
-    ## Требования
-    - Docker и Docker Compose (локально для теста)
-    - Python 3.11 в Docker-образе (поставляется в Dockerfile)
-
-    ## Запуск и отладка
-    - Локально: `docker-compose up --build`.
-    - Просмотр логов: `docker-compose logs -f`.
-    - Быстрая проверка: отправьте сообщение боту в Telegram — в логах контейнера должны появиться обработчики.
-
-    ## Деплой на сервер (кратко)
-    Репозиторий содержит автоматизированный bootstrap-скрипт `deploy/bootstrap-server-custom.sh`, который:
-
-    - устанавливает Docker и Docker Compose на сервере;
-    - создает пользователя для деплоя;
-    - подготавливает структуру `/opt/pybot/<BOT_NAME>` и bare-репозиторий для git-пушей;
-    - генерирует `docker-compose.prod.yml`, который ссылается на образ в GHCR (`ghcr.io/<OWNER>/tg-webhook-bot:latest`).
-
-    Пример запуска скрипта (на сервере):
-
-    ```powershell
-    sudo OWNER=your-github-username BOOT_USER=deploy BOT_NAME=my_first_bot BOT_PORT=8001 ./deploy/bootstrap-server-custom.sh
-    ```
-
-    После этого скрипт выведет инструкцию по добавлению `git remote` и отправке кода на сервер.
-
-    > Важно: отредактируйте `/opt/pybot/<BOT_NAME>/.env` на сервере и вставьте настоящий `BOT_TOKEN` и другие секреты.
-
-    ## Caddy и HTTPS
-    Рекомендуемый способ для обеспечения HTTPS — Caddy, который автоматически получает сертификаты и проксирует поддомены на нужные порты. В `deploy/Caddyfile.example` есть пример конфигурации; скопируйте и адаптируйте его в `/etc/caddy/Caddyfile` на сервере.
-
-    Короткие шаги:
-    1. Настройте DNS A-запись для каждого поддомена на IP сервера.
-    2. Используйте `deploy/Caddyfile.example` как шаблон.
-    3. Перезагрузите Caddy: `sudo systemctl reload caddy`.
-
-    ## CI/CD (GitHub Actions)
-    Ожидаемый процесс:
-
-    1. GitHub Actions собирает Docker-образ и публикует его в GHCR.
-    2. После успешной публикации workflow по SSH подключается к серверу и выполняет `docker-compose pull && docker-compose up -d` в рабочей директории.
-
-    Необходимые secrets в GitHub actions:
-    - `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `WORK_DIR` (и, при необходимости, `GHCR_TOKEN` для публикации образа).
-
-    ## Структура директорий (локально / на сервере)
-
-    Локально (репозиторий):
-
-    ```
-    bot.py
-    Dockerfile
-    docker-compose.yml
-    deploy/
-        ├─ bootstrap-server-custom.sh
-        ├─ Caddyfile.example
-        └─ docker-compose.prod.yml (пример)
-    ```
-
-    На сервере (пример):
-
-    ```
-    /opt/pybot/
-    ├── conf_git/
-    │   └── <bot>_repo.git  # bare-репозиторий для деплоя
-    └── <bot>/
-            ├── .env
-            ├── bot.py
-            └── docker-compose.prod.yml
-    ```
-
-    ## Troubleshooting
-    - Бот не стартует — проверьте логи `docker-compose logs` и `.env`.
-    - Вебхук не устанавливается — проверьте `WEBHOOK_HOST`, доступность порта и Caddy (если используется).
-    - Ошибки деплоя через GitHub Actions — проверьте, что образ публикуется в том же репозитории GHCR, который указан в `docker-compose.prod.yml`.
-
-    ## Полезные файлы
-    - `deploy/bootstrap-server-custom.sh` — автоматическая установка и подготовка сервера
-    - `deploy/Caddyfile.example` — шаблон конфигурации Caddy
-    - `docker-compose.yml` — локальный compose
+- **Бот не запускается**: Проверьте логи контейнера (`docker-compose logs -f` локально или `docker logs <container_name>` на сервере) и убедитесь, что все переменные в `.env` файле заданы корректно.
+- **Вебхук не устанавливается**: Убедитесь, что `WEBHOOK_HOST` доступен извне, порт не заблокирован, и Caddy (или другой прокси) настроен правильно.
+- **Ошибки деплоя GitHub Actions**: Проверьте, что все секреты (`SSH_HOST`, `SSH_USER` и т.д.) правильно добавлены в настройки репозитория, и что образ успешно публикуется в GHCR.

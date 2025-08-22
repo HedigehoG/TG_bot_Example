@@ -1,10 +1,11 @@
 #!/bin/bash
-# Custom bootstrap script tailored for a specific project/user.
-# Usage: sudo BOOT_USER=deployuser REPO_NAME=my-bots BOT_NAME=bot_main ./bootstrap-server-custom.sh
+# Скрипт для первоначальной настройки сервера для деплоя Telegram-бота.
+# Устанавливает Docker, создает пользователя для деплоя и настраивает окружение.
+# Usage: sudo DEPLOY_USER=deployer REPO_NAME=my-bots BOT_NAME=bot_main ./bootstrap-server-custom.sh
 
 set -euo pipefail
 
-BOOT_USER=${BOOT_USER:-deploy}
+DEPLOY_USER=${DEPLOY_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
 OWNER=${OWNER:-} # This should be set from the command line
@@ -26,7 +27,7 @@ REPO_NAME=${REPO_NAME,,}
 
 WORK_DIR=/opt/pybot/${BOT_NAME}
 
-echo "Custom bootstrap: WORK_DIR=${WORK_DIR}, USER=${BOOT_USER}, BOT_NAME=${BOT_NAME}"
+echo "Запуск настройки: WORK_DIR=${WORK_DIR}, DEPLOY_USER=${DEPLOY_USER}, BOT_NAME=${BOT_NAME}"
 
 # install docker (same as generic)
 if ! command -v docker >/dev/null 2>&1; then
@@ -42,21 +43,21 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # create user if not exists
-if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
-  echo "User ${BOOT_USER} not found. Creating..."
-  useradd -m -s /bin/bash "${BOOT_USER}"
+if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
+  echo "Пользователь ${DEPLOY_USER} не найден. Создание..."
+  useradd -m -s /bin/bash "${DEPLOY_USER}"
   # Add user to docker group to manage containers without sudo
-  usermod -aG docker "${BOOT_USER}"
-  echo "User ${BOOT_USER} created and added to the docker group."
+  usermod -aG docker "${DEPLOY_USER}"
+  echo "Пользователь ${DEPLOY_USER} создан и добавлен в группу docker."
 
   # Create .ssh directory and authorized_keys file
-  SSH_DIR="/home/${BOOT_USER}/.ssh"
+  SSH_DIR="/home/${DEPLOY_USER}/.ssh"
   mkdir -p "${SSH_DIR}"
   touch "${SSH_DIR}/authorized_keys"
   chmod 700 "${SSH_DIR}"
   chmod 600 "${SSH_DIR}/authorized_keys"
-  chown -R ${BOOT_USER}:${BOOT_USER} "${SSH_DIR}"
-  echo "SSH directory for ${BOOT_USER} created."
+  chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
+  echo "Создана директория SSH для пользователя ${DEPLOY_USER}."
 
   # Ensure PubkeyAuthentication is enabled in sshd_config and restart sshd.
   # This is crucial for the deployment key to work.
@@ -78,14 +79,14 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
 
   # Add the public key to authorized_keys
   cat "${KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
-  chown -R ${BOOT_USER}:${BOOT_USER} "${SSH_DIR}"
+  chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
   echo "Deployment key generated and authorized."
 
   echo "====================== GitHub Actions Secrets ======================"
   echo "Add the following secrets to your GitHub repository settings:"
   echo "--------------------------------------------------------------------"
   echo "SSH_HOST: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
-  echo "SSH_USER: ${BOOT_USER}"
+  echo "SSH_USER: ${DEPLOY_USER}"
   echo "WORK_DIR: ${WORK_DIR}"
   echo "---------------------- SSH_PRIVATE_KEY (copy all below) ------------------"
   echo "" # Add a blank line for easier copying
@@ -99,14 +100,14 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
   echo "===================================================================="
   # Securely remove the private key from the server after displaying it
   # We are commenting this line out to prevent issues with incorrectly copied keys.
-  # The private key will remain in /home/${BOOT_USER}/.ssh/ for later retrieval if needed.
+  # The private key will remain in /home/${DEPLOY_USER}/.ssh/ for later retrieval if needed.
   # rm -f "${KEY_PATH}"
 fi
 
 # create layout and permissions
 if [ ! -d "${WORK_DIR}" ]; then
     mkdir -p "${WORK_DIR}"
-    chown -R ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}"
+    chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}"
 fi
 
 # sample env and compose
@@ -118,7 +119,7 @@ WEBHOOK_HOST=https://${BOT_NAME}.example.com
 # Внутренний порт, на котором слушает приложение в контейнере. Он будет сопоставлен с BOT_PORT на хосте.
 PORT=8080
 ENV
-  chown ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}/.env"
+  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/.env"
 fi
 
 if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
@@ -141,7 +142,7 @@ networks:
   botnet:
     driver: bridge
 YML
-  chown ${BOOT_USER}:${BOOT_USER} "${WORK_DIR}/docker-compose.prod.yml"
+  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/docker-compose.prod.yml"
 fi
 
 echo "Bootstrap completed."
