@@ -119,8 +119,8 @@ ENV
   chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/.env"
 fi
 
-if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
-  cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
+if [ ! -f "${WORK_DIR}/docker-compose.yml" ]; then
+  cat > "${WORK_DIR}/docker-compose.yml" <<YML
 services:
   bot:
     # Имя образа будет передаваться через переменную окружения BOT_IMAGE во время деплоя
@@ -140,7 +140,7 @@ networks:
   botnet:
     driver: bridge
 YML
-  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/docker-compose.prod.yml"
+  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/docker-compose.yml"
 fi
 
 echo "Bootstrap completed."

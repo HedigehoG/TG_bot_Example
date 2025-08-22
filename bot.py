@@ -63,5 +63,10 @@ app.on_startup.append(on_startup)
 app.on_cleanup.append(on_shutdown)
 
 if __name__ == '__main__':
+    print(f"Starting bot...")
+    # Маскируем токен в логах для безопасности
+    print(f" - Bot Token: {'*' * (len(BOT_TOKEN) - 4) + BOT_TOKEN[-4:] if BOT_TOKEN else 'Not set'}")
+    print(f" - Webhook URL: {WEBHOOK_URL}")
+    print(f" - Listening on: {LISTEN_HOST}:{LISTEN_PORT}")
     # Запускаем приложение с правильными хостом и портом
     web.run_app(app, host=LISTEN_HOST, port=LISTEN_PORT)
