@@ -10,11 +10,14 @@ from aiogram.types import Update, Message
 from aiogram.filters import Command
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST','0.0.0.0')  # e.g. https://hedigehog.duckdns.org
-PORT = int(os.getenv('PORT', 8080))
+# Публичный адрес, на который Telegram будет отправлять обновления
+WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
+# Хост и порт, которые будет слушать наше приложение ВНУТРИ контейнера
+LISTEN_HOST = os.getenv('HOST', '0.0.0.0')
+LISTEN_PORT = int(os.getenv('PORT', 8080))
 
 if not BOT_TOKEN or not WEBHOOK_HOST:
-    raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in environment')
+    raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in your environment (.env file)')
 
 # Используем простой и статический путь. Маршрутизация будет осуществляться через поддомен.
 WEBHOOK_PATH = "/webhook"
@@ -61,4 +64,4 @@ app.on_cleanup.append(on_shutdown)
 
 if __name__ == '__main__':
     # Запускаем приложение с правильными хостом и портом
-    web.run_app(app, host=WEBHOOK_HOST, port=PORT)
+    web.run_app(app, host=LISTEN_HOST, port=LISTEN_PORT)
