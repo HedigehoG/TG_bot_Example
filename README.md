@@ -49,11 +49,12 @@
 OWNER="your-github-username"      # Ваш логин на GitHub
 REPO_NAME="your-repo-name"        # Название вашего репозитория на GitHub
 BOT_NAME="bot_main"               # Имя для каталога бота на сервере
-BOT_PORT="8001"                   # Порт на хосте, который будет слушать бот
+BOT_PORT="8001"                   # Внешний порт на хосте, который будет слушать бот
+CONTAINER_PORT="8080"             # Внутренний порт в контейнере (опционально, по умолчанию 8080)
 DEPLOY_USER="deploy"              # Имя пользователя для деплоя (опционально, по умолчанию 'deploy')
 
 # 2. Запустите скрипт с GitHub
-sudo env OWNER=$OWNER REPO_NAME=$REPO_NAME BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT DEPLOY_USER=$DEPLOY_USER \
+sudo env OWNER=$OWNER REPO_NAME=$REPO_NAME BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT CONTAINER_PORT=$CONTAINER_PORT DEPLOY_USER=$DEPLOY_USER \
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/main/deploy/bootstrap-server-custom.sh)"
 ```
 

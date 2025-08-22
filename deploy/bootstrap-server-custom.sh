@@ -8,6 +8,7 @@ set -euo pipefail
 DEPLOY_USER=${DEPLOY_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
+CONTAINER_PORT=${CONTAINER_PORT:-8080}
 OWNER=${OWNER:-} # This should be set from the command line
 REPO_NAME=${REPO_NAME:-} # This should be set from the command line
 
@@ -72,15 +73,23 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   systemctl restart sshd
   echo "SSH server reconfigured to accept public key authentication."
 
-  # Generate a new SSH key pair for deployment
-  echo "Generating a new SSH key for deployment..."
-  KEY_PATH="${SSH_DIR}/id_ed25519_deploy"
-  ssh-keygen -t ed25519 -f "${KEY_PATH}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
+  # --- Генерация ключей ---
+  # 1. Генерируем ключ для деплоя в формате PEM для совместимости с GitHub Actions
+  echo "Генерация ключа для деплоя (формат PEM для GitHub Actions)..."
+  DEPLOY_KEY_PATH="${SSH_DIR}/id_ed25519_deploy"
+  ssh-keygen -m PEM -t ed25519 -f "${DEPLOY_KEY_PATH}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
 
-  # Add the public key to authorized_keys
-  cat "${KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
+  # 2. Генерируем персональный ключ в стандартном формате OpenSSH для ручного доступа
+  echo "Генерация персонального ключа (стандартный формат для ручного SSH)..."
+  PERSONAL_KEY_PATH="${SSH_DIR}/id_ed25519_personal"
+  ssh-keygen -t ed25519 -f "${PERSONAL_KEY_PATH}" -N "" -C "personal-key-${DEPLOY_USER}@$(hostname)"
+
+  # Добавляем ОБА публичных ключа в authorized_keys
+  cat "${DEPLOY_KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
+  cat "${PERSONAL_KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
+
   chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
-  echo "Deployment key generated and authorized."
+  echo "Ключи для деплоя и для персонального доступа сгенерированы и авторизованы."
 
   echo "====================== GitHub Actions Secrets ======================"
   echo "Add the following secrets to your GitHub repository settings:"
@@ -88,15 +97,23 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   echo "SSH_HOST: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
   echo "SSH_USER: ${DEPLOY_USER}"
   echo "WORK_DIR: ${WORK_DIR}"
-  echo "---------------------- SSH_PRIVATE_KEY (copy all below) ------------------"
+  echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
+  echo "Скопируйте всё, что находится между линиями, включая 'BEGIN' и 'END'."
+  echo "Этот ключ предназначен ТОЛЬКО для GitHub Actions."
   echo "" # Add a blank line for easier copying
-  cat "${KEY_PATH}"
+  cat "${DEPLOY_KEY_PATH}"
   echo "" # Add a blank line for easier copying
-  echo "---------------------- SSH_PUBLIC_KEY (for debugging) --------------------"
-  echo "Add this as a GitHub secret named SSH_PUBLIC_KEY. It helps verify the private key."
+  echo "---------------------- SSH_PUBLIC_KEY (ВАЖНО!) -------------------"
+  echo "Добавьте этот ключ как секрет с именем SSH_PUBLIC_KEY."
+  echo "Он используется в GitHub Actions для проверки, что приватный ключ скопирован верно."
   echo ""
-  cat "${KEY_PATH}.pub"
+  cat "${DEPLOY_KEY_PATH}.pub"
   echo ""
+  echo "===================================================================="
+  echo ""
+  echo "========== Для ручного подключения по SSH (сохраните!) =========="
+  echo "Используйте этот приватный ключ для подключения с вашего компьютера:"
+  cat "${PERSONAL_KEY_PATH}"
   echo "===================================================================="
   # Securely remove the private key from the server after displaying it
   # We are commenting this line out to prevent issues with incorrectly copied keys.
@@ -116,8 +133,8 @@ if [ ! -f "${WORK_DIR}/.env" ]; then
 BOT_TOKEN=123456:ABC-DEF-YOUR_TOKEN
 # WEBHOOK_HOST должен указывать на уникальный поддомен для этого бота, например https://my-first-bot.your-domain.com
 WEBHOOK_HOST=https://${BOT_NAME}.example.com
-# Внутренний порт, на котором слушает приложение в контейнере. Он будет сопоставлен с BOT_PORT на хосте.
-PORT=8080
+# PORT - это порт, который слушает приложение ВНУТРИ контейнера.
+PORT=${CONTAINER_PORT}
 ENV
   chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/.env"
 fi
@@ -130,7 +147,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${BOT_PORT}:8080" # Проброс порта с хоста (BOT_PORT) в контейнер (8080)
+      - "${BOT_PORT}:${CONTAINER_PORT}" # Проброс порта с хоста (BOT_PORT) в контейнер (CONTAINER_PORT)
     restart: unless-stopped
     # Ограничиваем использование памяти для защиты сервера
     mem_limit: 150m
