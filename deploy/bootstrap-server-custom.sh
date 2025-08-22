@@ -8,23 +8,17 @@ set -euo pipefail
 DEPLOY_USER=${DEPLOY_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
-CONTAINER_PORT=${CONTAINER_PORT:-8080}
-OWNER=${OWNER:-} # This should be set from the command line
-REPO_NAME=${REPO_NAME:-} # This should be set from the command line
+CONTAINER_PORT=${CONTAINER_PORT:-8080} 
+GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # e.g., my-username/my-cool-repo
 
-if [ -z "${OWNER}" ]; then
-  echo "Error: GitHub username is not set. Please provide it via the OWNER environment variable."
-  echo "Usage: sudo OWNER=your-github-username REPO_NAME=your-repo-name ./bootstrap-server-custom.sh"
+if [ -z "${GITHUB_REPOSITORY}" ] || [[ ! "${GITHUB_REPOSITORY}" == */* ]]; then
+  echo "Error: GitHub repository is not set or has an invalid format."
+  echo "Please provide it via the GITHUB_REPOSITORY environment variable."
+  echo "Usage: sudo GITHUB_REPOSITORY=your-username/your-repo-name ./bootstrap-server-custom.sh"
   exit 1
 fi
-if [ -z "${REPO_NAME}" ]; then
-  echo "Error: GitHub repository name is not set. Please provide it via the REPO_NAME environment variable."
-  echo "Usage: sudo OWNER=your-github-username REPO_NAME=your-repo-name ./bootstrap-server-custom.sh"
-  exit 1
-fi
-# Convert OWNER to lowercase to comply with Docker image naming conventions.
-OWNER=${OWNER,,}
-REPO_NAME=${REPO_NAME,,}
+# Convert to lowercase to match GitHub Actions behavior for ghcr.io images.
+GITHUB_REPOSITORY=${GITHUB_REPOSITORY,,}
 
 WORK_DIR=/opt/pybot/${BOT_NAME}
 
@@ -127,7 +121,7 @@ if [ ! -f "${WORK_DIR}/docker-compose.prod.yml" ]; then
   cat > "${WORK_DIR}/docker-compose.prod.yml" <<YML
 services:
   bot:
-    image: ghcr.io/${OWNER}/${REPO_NAME}:latest
+    image: ghcr.io/${GITHUB_REPOSITORY}:latest
     env_file:
       - .env
     ports:
