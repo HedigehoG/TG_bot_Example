@@ -78,42 +78,26 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   echo "Генерация ключа для деплоя (формат PEM для GitHub Actions)..."
   DEPLOY_KEY_PATH="${SSH_DIR}/id_ed25519_deploy"
   ssh-keygen -m PEM -t ed25519 -f "${DEPLOY_KEY_PATH}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
-
-  # 2. Генерируем персональный ключ в стандартном формате OpenSSH для ручного доступа
-  echo "Генерация персонального ключа (стандартный формат для ручного SSH)..."
-  PERSONAL_KEY_PATH="${SSH_DIR}/id_ed25519_personal"
-  ssh-keygen -t ed25519 -f "${PERSONAL_KEY_PATH}" -N "" -C "personal-key-${DEPLOY_USER}@$(hostname)"
-
-  # Добавляем ОБА публичных ключа в authorized_keys
+ 
+  # Добавляем публичный ключ в authorized_keys
   cat "${DEPLOY_KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
-  cat "${PERSONAL_KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
 
   chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
-  echo "Ключи для деплоя и для персонального доступа сгенерированы и авторизованы."
+  echo "Ключ для деплоя сгенерирован и авторизован."
 
   echo "====================== GitHub Actions Secrets ======================"
   echo "Add the following secrets to your GitHub repository settings:"
   echo "--------------------------------------------------------------------"
-  echo "SSH_HOST: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+  # Пытаемся получить публичный IPv4. Если не вышло, ищем первый IPv4 в выводе hostname -I.
+  echo "SSH_HOST: $(curl -4s ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')"
   echo "SSH_USER: ${DEPLOY_USER}"
   echo "WORK_DIR: ${WORK_DIR}"
   echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
-  echo "Скопируйте всё, что находится между линиями, включая 'BEGIN' и 'END'."
+  echo "Скопируйте всё, что находится между линиями, включая 'BEGIN' и 'END' и пустую строку после ключа."
   echo "Этот ключ предназначен ТОЛЬКО для GitHub Actions."
   echo "" # Add a blank line for easier copying
   cat "${DEPLOY_KEY_PATH}"
   echo "" # Add a blank line for easier copying
-  echo "---------------------- SSH_PUBLIC_KEY (ВАЖНО!) -------------------"
-  echo "Добавьте этот ключ как секрет с именем SSH_PUBLIC_KEY."
-  echo "Он используется в GitHub Actions для проверки, что приватный ключ скопирован верно."
-  echo ""
-  cat "${DEPLOY_KEY_PATH}.pub"
-  echo ""
-  echo "===================================================================="
-  echo ""
-  echo "========== Для ручного подключения по SSH (сохраните!) =========="
-  echo "Используйте этот приватный ключ для подключения с вашего компьютера:"
-  cat "${PERSONAL_KEY_PATH}"
   echo "===================================================================="
   # Securely remove the private key from the server after displaying it
   # We are commenting this line out to prevent issues with incorrectly copied keys.
