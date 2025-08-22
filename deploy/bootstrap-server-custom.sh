@@ -88,10 +88,14 @@ if ! id -u "${BOOT_USER}" >/dev/null 2>&1; then
   echo "SSH_USER: ${BOOT_USER}"
   echo "WORK_DIR: ${WORK_DIR}"
   echo "---------------------- SSH_PRIVATE_KEY (copy all) ------------------"
+  echo "" # Add a blank line for easier copying
   cat "${KEY_PATH}"
+  echo "" # Add a blank line for easier copying
   echo "===================================================================="
   # Securely remove the private key from the server after displaying it
-  rm -f "${KEY_PATH}"
+  # We are commenting this line out to prevent issues with incorrectly copied keys.
+  # The private key will remain in /home/${BOOT_USER}/.ssh/ for later retrieval if needed.
+  # rm -f "${KEY_PATH}"
 fi
 
 # create layout and permissions

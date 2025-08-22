@@ -56,6 +56,11 @@ jobs:
       WORK_DIR: ${{ secrets.WORK_DIR }}
 
     steps:
+      - name: Add server fingerprint to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
