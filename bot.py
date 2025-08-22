@@ -10,8 +10,8 @@ from aiogram.types import Update, Message
 from aiogram.filters import Command
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')  # e.g. https://hedigehog.duckdns.org
-PORT = int(os.getenv('PORT', 3000))
+WEBHOOK_HOST = os.getenv('WEBHOOK_HOST','0.0.0.0')  # e.g. https://hedigehog.duckdns.org
+PORT = int(os.getenv('PORT', 8080))
 
 if not BOT_TOKEN or not WEBHOOK_HOST:
     raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in environment')
@@ -60,4 +60,5 @@ app.on_startup.append(on_startup)
 app.on_cleanup.append(on_shutdown)
 
 if __name__ == '__main__':
-    web.run_app(app, host='127.0.0.1', port=PORT)
+    # Запускаем приложение с правильными хостом и портом
+    web.run_app(app, host=WEBHOOK_HOST, port=PORT)

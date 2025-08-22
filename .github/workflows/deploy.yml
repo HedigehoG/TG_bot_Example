@@ -55,6 +55,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       WORK_DIR: ${{ secrets.WORK_DIR }}
       IMAGE_NAME: ${{ needs.build-and-push-image.outputs.image_name }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
 
     steps:
       - name: Add server fingerprint to known_hosts
@@ -75,14 +76,27 @@ jobs:
             export BOT_IMAGE="${{ env.IMAGE_NAME }}"
             echo "Attempting to deploy image: $BOT_IMAGE"
 
+            # Безопасно обновляем .env файл на сервере, добавляя/обновляя BOT_TOKEN
+            # Это позволяет хранить токен в GitHub Secrets, а не в репозитории или на диске сервера.
+            if [ -f .env ]; then
+                grep -v '^BOT_TOKEN=' .env > .env.tmp && mv .env.tmp .env
+            fi
+            echo "BOT_TOKEN=${{ env.BOT_TOKEN }}" >> .env
+
             # Логинимся в GitHub Container Registry
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
             # Скачиваем образ, используя переменную окружения, и перезапускаем сервис
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker compose pull
+            docker compose up -d --remove-orphans
             
             # Очищаем старые образы
             docker image prune -af
 
-            echo "Deployment successful"
+            echo "Deployment successful. Waiting a moment for the container to initialize..."
+            sleep 5 # Даем контейнеру пару секунд на запуск и генерацию первых логов
+
+            echo "Displaying recent logs from the container:"
+            # Выводим последние 50 строк логов сервиса 'bot' для быстрой проверки.
+            # Это поможет сразу увидеть, успешно ли стартовало приложение внутри контейнера.
+            docker compose logs --tail 50 bot

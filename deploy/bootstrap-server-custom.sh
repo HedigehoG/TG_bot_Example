@@ -108,11 +108,13 @@ fi
 # sample env and compose
 if [ ! -f "${WORK_DIR}/.env" ]; then
   cat > "${WORK_DIR}/.env" <<ENV
-BOT_TOKEN=123456:ABC-DEF-YOUR_TOKEN
-# WEBHOOK_HOST должен указывать на уникальный поддомен для этого бота, например https://my-first-bot.your-domain.com
+# BOT_TOKEN будет автоматически добавлен во время деплоя из GitHub Secrets.
+# WEBHOOK_HOST должен указывать на публичный адрес вашего сервера, например https://my-first-bot.your-domain.com
 WEBHOOK_HOST=https://${BOT_NAME}.example.com
 # PORT - это порт, который слушает приложение ВНУТРИ контейнера.
 PORT=${CONTAINER_PORT}
+# HOST - это адрес, который слушает приложение ВНУТРИ контейнера. 0.0.0.0 - стандарт для Docker.
+HOST=0.0.0.0
 ENV
   chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/.env"
 fi
@@ -143,6 +145,7 @@ fi
 
 echo "Bootstrap completed."
 echo "Next steps:"
-echo "1. Ensure you have added the secrets above to your GitHub repository."
-echo "2. Edit the placeholder values in ${WORK_DIR}/.env on the server."
-echo "3. Push to the 'main' branch to trigger the deployment."
+echo "1. Add the secrets displayed above to your GitHub repository."
+echo "2. IMPORTANT: Add your bot's token as a GitHub Secret named 'BOT_TOKEN'."
+echo "3. Edit the placeholder values in ${WORK_DIR}/.env on the server (e.g., WEBHOOK_HOST)."
+echo "4. Push to the 'main' branch to trigger the deployment."
