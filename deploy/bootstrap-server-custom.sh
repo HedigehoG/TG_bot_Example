@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+if [ "$(id -u)" -ne 0 ]; then
+  echo "This script must be run as root. Please use sudo." >&2
+  exit 1
+fi
+
 DEPLOY_USER=${DEPLOY_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
 BOT_PORT=${BOT_PORT:-8001}
@@ -96,7 +101,7 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   # Securely remove the private key from the server after displaying it
   # We are commenting this line out to prevent issues with incorrectly copied keys.
   # The private key will remain in /home/${DEPLOY_USER}/.ssh/ for later retrieval if needed.
-  # rm -f "${KEY_PATH}"
+  # rm -f "${DEPLOY_KEY_PATH}"
 fi
 
 # create layout and permissions
@@ -133,6 +138,13 @@ services:
     # Ограничиваем использование памяти для защиты сервера
     mem_limit: 150m
     memswap_limit: 300m
+    healthcheck:
+      # Проверяем, отвечает ли веб-сервер внутри контейнера.
+      # Это поможет понять, запустилось ли приложение успешно.
+      test: ["CMD", "curl", "-f", "http://localhost:${CONTAINER_PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     # Явно указываем DNS-серверы для надежного разрешения имен внутри контейнера.
     # Это решает проблему "Temporary failure in name resolution".
     dns:

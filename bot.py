@@ -2,12 +2,16 @@ import os
 import asyncio
 from aiohttp import web
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update, Message
 from aiogram.filters import Command
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 # Публичный адрес, на который Telegram будет отправлять обновления
@@ -37,18 +41,24 @@ async def echo(message: Message):
 
 async def handle(request: web.Request) -> web.Response:
     try:
-        data = await request.json()
-    except Exception:
-        return web.Response(status=400, text='invalid json')
-    update = Update(**data)
-    # feed update into dispatcher
-    await dp.feed_update(update)
-    return web.Response(status=200)
+        bot: Bot = request.app['bot']
+        update_data = await request.json()
+        update = Update(**update_data)
+        await dp.feed_update(bot=bot, update=update)
+        return web.Response()  # Возвращаем 200 OK без тела
+    except Exception as e:
+        logging.error("Error processing update: %s", e, exc_info=True)
+        # Отвечаем 200 OK, чтобы Telegram не пересылал "сломанное" обновление.
+        return web.Response(status=200, text="ok")
 
 async def on_startup(app: web.Application):
     await bot.set_webhook(WEBHOOK_URL)
     app['bot'] = bot
-    print('Webhook set to', WEBHOOK_URL)
+    logging.info('Webhook set to %s', WEBHOOK_URL)
+
+async def health_check(request):
+    """Простой ответ для healthcheck'а от Docker."""
+    return web.Response(text="OK")
 
 async def on_shutdown(app: web.Application):
     bot = app.get('bot')
@@ -58,15 +68,21 @@ async def on_shutdown(app: web.Application):
 
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle)
+app.router.add_get("/health", health_check)
 app.router.add_get('/', lambda request: web.Response(text='tg-webhook-bot: ok'))
+# ---------------------------
+
 app.on_startup.append(on_startup)
-app.on_cleanup.append(on_shutdown)
+app.on_shutdown.append(on_shutdown)
+
+
+
 
 if __name__ == '__main__':
-    print(f"Starting bot...")
+    logging.info("Starting bot...")
     # Маскируем токен в логах для безопасности
-    print(f" - Bot Token: {'*' * (len(BOT_TOKEN) - 4) + BOT_TOKEN[-4:] if BOT_TOKEN else 'Not set'}")
-    print(f" - Webhook URL: {WEBHOOK_URL}")
-    print(f" - Listening on: {LISTEN_HOST}:{LISTEN_PORT}")
+    logging.info(" - Bot Token: %s", f"{'*' * (len(BOT_TOKEN) - 4) + BOT_TOKEN[-4:] if BOT_TOKEN else 'Not set'}")
+    logging.info(" - Webhook URL: %s", WEBHOOK_URL)
+    logging.info(" - Listening on: %s:%s", LISTEN_HOST, LISTEN_PORT)
     # Запускаем приложение с правильными хостом и портом
     web.run_app(app, host=LISTEN_HOST, port=LISTEN_PORT)
