@@ -76,8 +76,6 @@ app.on_startup.append(on_startup)
 app.on_shutdown.append(on_shutdown)
 
 
-
-
 if __name__ == '__main__':
     logging.info("Starting bot...")
     # Маскируем токен в логах для безопасности

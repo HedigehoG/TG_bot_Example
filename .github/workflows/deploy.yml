@@ -1,38 +1,64 @@
-name: Build and Deploy
+name: Build, Deploy and Manage Bot
 
 on:
-  push:
-    branches: [ "main" ]
+  # 1. Позволяет запускать воркфлоу вручную из вкладки Actions в GitHub
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'build_and_deploy'
+        type: choice
+        options:
+          - build_and_deploy
+          - build_only
+          - deploy_only
+          - stop
+      image_tag:
+        description: 'Image tag to deploy (for deploy_only action)'
+        required: false
+        default: 'latest'
+
+  # 2. Автоматически запускает сборку и деплой при пуше в `main`
+  push:
+    branches:
+      - main
 
 jobs:
-  build-and-push-image:
+  build:
+    name: Build Docker Image
+    # Запускаем сборку если:
+    # - это пуш в main
+    # - вручную выбрано 'build_and_deploy' или 'build_only'
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'build_and_deploy' || github.event.inputs.action == 'build_only'))
     runs-on: ubuntu-latest
+    outputs:
+      image_tag_sha: ${{ steps.meta.outputs.version }}
     permissions:
       contents: read
       packages: write
-
-    outputs:
-      image_name: ${{ steps.meta.outputs.tags }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
+      - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # Используем имя репозитория для имени образа.
-          # `metadata-action` автоматически приведет имя владельца к нижнему регистру.
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -43,60 +69,64 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   deploy:
-    needs: build-and-push-image
+    name: Deploy to Server
+    # Запускаем деплой если:
+    # - это пуш в main (после сборки)
+    # - вручную выбрано 'build_and_deploy' (после сборки)
+    # - вручную выбрано 'deploy_only'
+    needs: build
+    if: |
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'build_and_deploy')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy_only')
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    # Явно определяем переменные окружения из секретов для наглядности.
-    # Задача завершится с более понятной ошибкой, если эти секреты не установлены.
-    env:
-      SSH_HOST: ${{ secrets.SSH_HOST }}
-      SSH_USER: ${{ secrets.SSH_USER }}
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      WORK_DIR: ${{ secrets.WORK_DIR }}
-      IMAGE_NAME: ${{ needs.build-and-push-image.outputs.image_name }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-
     steps:
-      - name: Add server fingerprint to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ env.SSH_HOST }}
-          username: ${{ env.SSH_USER }}
-          key: ${{ env.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ${{ env.WORK_DIR }}
+            set -euo pipefail
+            cd ${{ secrets.WORK_DIR }}
 
-            # Устанавливаем переменную окружения с точным именем образа из шага сборки
-            export BOT_IMAGE="${{ env.IMAGE_NAME }}"
-            echo "Attempting to deploy image: $BOT_IMAGE"
-
-            # Безопасно обновляем .env файл на сервере, добавляя/обновляя BOT_TOKEN
-            # Это позволяет хранить токен в GitHub Secrets, а не в репозитории или на диске сервера.
-            if [ -f .env ]; then
-                grep -v '^BOT_TOKEN=' .env > .env.tmp && mv .env.tmp .env
+            if [[ "${{ github.event.inputs.action }}" == "deploy_only" ]]; then
+              IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+            else
+              IMAGE_TAG="${{ needs.build.outputs.image_tag_sha }}"
             fi
-            echo "BOT_TOKEN=${{ env.BOT_TOKEN }}" >> .env
 
-            # Логинимся в GitHub Container Registry
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Скачиваем образ, используя переменную окружения, и перезапускаем сервис
+            export BOT_IMAGE="ghcr.io/${{ github.repository }}:$IMAGE_TAG"
+            echo "--- Deploying image: $BOT_IMAGE"
+
+            echo "--- Updating .env file with BOT_TOKEN"
+            sed -i '/^#\?BOT_TOKEN=/d' .env
+            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+
+            echo "--- Pulling new image"
             docker compose pull
-            docker compose up -d --remove-orphans
-            
-            # Очищаем старые образы
+
+            echo "--- Restarting container"
+            docker compose up -d --force-recreate
+
+            echo "--- Pruning old images"
             docker image prune -af
 
-            echo "Deployment successful. Waiting a moment for the container to initialize..."
-            sleep 5 # Даем контейнеру пару секунд на запуск и генерацию первых логов
-
-            echo "Displaying recent logs from the container:"
-            # Выводим последние 50 строк логов сервиса 'bot' для быстрой проверки.
-            # Это поможет сразу увидеть, успешно ли стартовало приложение внутри контейнера.
-            docker compose logs --tail 50 bot
+  stop:
+    name: Stop Bot
+    # Запускаем остановку только если выбрано вручную
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'stop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop bot on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.WORK_DIR }}
+            echo "--- Stopping bot..."
+            docker compose down
+            echo "--- Bot stopped."

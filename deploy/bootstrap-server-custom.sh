@@ -140,6 +140,7 @@ services:
     memswap_limit: 300m
     healthcheck:
       # Проверяем, отвечает ли веб-сервер внутри контейнера.
+      # ВАЖНО: для работы healthcheck в вашем Docker-образе должен быть установлен curl.
       # Это поможет понять, запустилось ли приложение успешно.
       test: ["CMD", "curl", "-f", "http://localhost:${CONTAINER_PORT}/health"]
       interval: 30s
