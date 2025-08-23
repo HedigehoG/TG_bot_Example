@@ -1,7 +1,6 @@
 #!/bin/bash
 # Скрипт для первоначальной настройки сервера для деплоя Telegram-бота.
 # Устанавливает Docker, создает пользователя для деплоя и настраивает окружение.
-# Usage: sudo DEPLOY_USER=deployer REPO_NAME=my-bots BOT_NAME=bot_main ./bootstrap-server-custom.sh
 
 set -euo pipefail
 

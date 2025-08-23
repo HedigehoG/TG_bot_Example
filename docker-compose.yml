@@ -4,6 +4,8 @@ services:
     build: .
     env_file:
       - .env
+  ports:
+    - "8080:8080" # Пробрасываем порт 8080 контейнера на порт 8080 хоста
     restart: unless-stopped
     networks:
       - botnet

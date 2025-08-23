@@ -34,7 +34,7 @@
 - Создает специального пользователя для деплоя (например, `deploy`).
 - Генерирует SSH-ключ для беспарольного доступа с GitHub Actions.
 - Создает структуру каталогов для бота в `/opt/pybot/<BOT_NAME>`.
-- Генерирует файлы `.env` и `docker-compose.prod.yml`.
+- Генерирует файлы `.env` и `docker-compose.yml`.
 
 **Запуск скрипта на сервере:**
 
@@ -45,17 +45,16 @@
 Выполните на сервере следующие команды, подставив свои значения:
 
 ```bash
-# 1. Задайте переменные
-OWNER="your-github-username"      # Ваш логин на GitHub
-REPO_NAME="your-repo-name"        # Название вашего репозитория на GitHub
-BOT_NAME="bot_main"               # Имя для каталога бота на сервере
-BOT_PORT="8001"                   # Внешний порт на хосте, который будет слушать бот
-CONTAINER_PORT="8080"             # Внутренний порт в контейнере (опционально, по умолчанию 8080)
-DEPLOY_USER="deploy"              # Имя пользователя для деплоя (опционально, по умолчанию 'deploy')
+# 1. Задайте переменные. GITHUB_REPOSITORY должен быть в формате 'owner/repo-name'.
+GITHUB_REPOSITORY="your-github-username/your-repo-name" # Путь к вашему репозиторию на GitHub
+BOT_NAME="bot_main"                                     # Имя для каталога бота на сервере
+BOT_PORT="8001"                                         # Внешний порт на хосте, который будет слушать бот
+CONTAINER_PORT="8080"                                   # Внутренний порт в контейнере (по умолчанию 8080)
+DEPLOY_USER="deploy"                                    # Имя пользователя для деплоя (по умолчанию 'deploy')
 
-# 2. Запустите скрипт с GitHub
-sudo env OWNER=$OWNER REPO_NAME=$REPO_NAME BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT CONTAINER_PORT=$CONTAINER_PORT DEPLOY_USER=$DEPLOY_USER \
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/main/deploy/bootstrap-server-custom.sh)"
+# 2. Запустите скрипт с GitHub. Он использует переменную GITHUB_REPOSITORY для настройки.
+sudo env GITHUB_REPOSITORY=$GITHUB_REPOSITORY BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT CONTAINER_PORT=$CONTAINER_PORT DEPLOY_USER=$DEPLOY_USER \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/deploy/bootstrap-server-custom.sh)"
 ```
 
 После выполнения скрипт выведет **секреты, которые нужно добавить в ваш репозиторий на GitHub** (`Settings -> Secrets and variables -> Actions`):
@@ -63,8 +62,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/ma
 - `SSH_USER`: Пользователь, созданный скриптом (`deploy` по умолчанию).
 - `SSH_PRIVATE_KEY`: Закрытый SSH-ключ для доступа к серверу.
 - `WORK_DIR`: Рабочий каталог на сервере (например, `/opt/pybot/bot_main`).
+- `BOT_TOKEN`: Токен вашего бота. (получить от ботфазера)
 
-> **Важно:** После выполнения скрипта не забудьте отредактировать файл `.env` на сервере (`/opt/pybot/<BOT_NAME>/.env`) и указать ваш настоящий `BOT_TOKEN` и `WEBHOOK_HOST`.
+> **Важно:** После выполнения скрипта вам нужно сделать две вещи:
+> 1. Отредактировать файл `.env` на сервере (`/opt/pybot/<BOT_NAME>/.env`) и указать ваш `WEBHOOK_HOST`. Должен быть одинаковым с следующим шагом
 
 ## Шаг 2: Настройка DNS и Caddy (HTTPS)
 
@@ -107,11 +108,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/ma
 > **Внимание:** Эти команды необратимо удалят данные. Убедитесь, что вы выбрали правильного пользователя и каталоги.
 
 1.  **Остановите и удалите контейнеры бота:**
-    Замените `bot_main` на имя вашего бота.
+    Замените `bot_main` на имя вашего бота, если вы его меняли.
 
     ```bash
     BOT_NAME="bot_main"
-    cd "/opt/pybot/${BOT_NAME}" && sudo docker-compose -f docker-compose.prod.yml down
+    cd "/opt/pybot/${BOT_NAME}" && sudo docker-compose down
     ```
 
 2.  **Удалите пользователя для деплоя:**
