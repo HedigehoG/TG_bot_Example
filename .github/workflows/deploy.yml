@@ -90,7 +90,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            cd ${{ secrets.WORK_DIR }}
 
             if [[ "${{ github.event.inputs.action }}" == "deploy_only" ]]; then
               IMAGE_TAG="${{ github.event.inputs.image_tag }}"
@@ -128,7 +127,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            cd ${{ secrets.WORK_DIR }}
             echo "--- Stopping bot..."
             docker compose down
             echo "--- Bot stopped."

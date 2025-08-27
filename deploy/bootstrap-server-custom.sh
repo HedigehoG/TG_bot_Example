@@ -9,8 +9,9 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-DEPLOY_USER=${DEPLOY_USER:-deploy}
 BOT_NAME=${BOT_NAME:-bot_main}
+# Для лучшей изоляции и простоты назовем пользователя для деплоя так же, как и бота.
+DEPLOY_USER=${BOT_NAME}
 BOT_PORT=${BOT_PORT:-8001}
 CONTAINER_PORT=${CONTAINER_PORT:-8080} 
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # e.g., my-username/my-cool-repo
@@ -24,7 +25,8 @@ fi
 # Convert to lowercase to match GitHub Actions behavior for ghcr.io images.
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY,,}
 
-WORK_DIR=/opt/pybot/${BOT_NAME}
+# Рабочей директорией будет домашний каталог пользователя.
+WORK_DIR="/home/${DEPLOY_USER}"
 
 echo "Запуск настройки: WORK_DIR=${WORK_DIR}, DEPLOY_USER=${DEPLOY_USER}, BOT_NAME=${BOT_NAME}"
 
@@ -34,8 +36,10 @@ if ! command -v docker >/dev/null 2>&1; then
   apt-get install -y ca-certificates curl gnupg lsb-release
   mkdir -p /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\" \
-    | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  # Примечание: Скрипт адаптирован для Ubuntu. Для других Debian-based систем 'ubuntu' может потребоваться заменить на 'debian'.
+  tee /etc/apt/sources.list.d/docker.list > /dev/null <<EOF
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable
+EOF
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable --now docker
@@ -44,7 +48,8 @@ fi
 # create user if not exists
 if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   echo "Пользователь ${DEPLOY_USER} не найден. Создание..."
-  useradd -m -s /bin/bash "${DEPLOY_USER}"
+  # Флаг -m создает домашнюю директорию, которая и будет нашей WORK_DIR.
+  useradd -m -s /bin/bash -d "${WORK_DIR}" "${DEPLOY_USER}"
   # Add user to docker group to manage containers without sudo
   usermod -aG docker "${DEPLOY_USER}"
   echo "Пользователь ${DEPLOY_USER} создан и добавлен в группу docker."
@@ -89,7 +94,6 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   # Пытаемся получить публичный IPv4. Если не вышло, ищем первый IPv4 в выводе hostname -I.
   echo "SSH_HOST: $(curl -4s ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')"
   echo "SSH_USER: ${DEPLOY_USER}"
-  echo "WORK_DIR: ${WORK_DIR}"
   echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
   echo "Скопируйте всё, что находится между линиями, включая 'BEGIN' и 'END' и пустую строку после ключа."
   echo "Этот ключ предназначен ТОЛЬКО для GitHub Actions."
@@ -101,12 +105,6 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
   # We are commenting this line out to prevent issues with incorrectly copied keys.
   # The private key will remain in /home/${DEPLOY_USER}/.ssh/ for later retrieval if needed.
   # rm -f "${DEPLOY_KEY_PATH}"
-fi
-
-# create layout and permissions
-if [ ! -d "${WORK_DIR}" ]; then
-    mkdir -p "${WORK_DIR}"
-    chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}"
 fi
 
 # sample env and compose
@@ -139,8 +137,8 @@ services:
     memswap_limit: 300m
     healthcheck:
       # Проверяем, отвечает ли веб-сервер внутри контейнера.
-      # ВАЖНО: для работы healthcheck в вашем Docker-образе должен быть установлен curl.
-      # Это поможет понять, запустилось ли приложение успешно.
+      # ВАЖНО: для работы healthcheck в вашем Docker-образе должен быть установлен curl,
+      # а само приложение должно отвечать на GET-запросы по пути /health.
       test: ["CMD", "curl", "-f", "http://localhost:${CONTAINER_PORT}/health"]
       interval: 30s
       timeout: 10s
