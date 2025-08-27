@@ -31,29 +31,28 @@
 
 **Что делает скрипт:**
 - Устанавливает Docker и Docker Compose.
-- Создает специального пользователя для деплоя (например, `deploy`).
+- Создает специального пользователя для деплоя (по умолчанию `bot_main`).
+- Использует домашний каталог этого пользователя (`/home/bot_main`) как рабочую директорию.
 - Генерирует SSH-ключ для беспарольного доступа с GitHub Actions.
-- Создает структуру каталогов для бота в `/opt/pybot/<BOT_NAME>`.
-- Генерирует файлы `.env` и `docker-compose.yml`.
+- В интерактивном режиме запрашивает `WEBHOOK_HOST` и порт бота.
+- Генерирует файлы `.env` и `docker-compose.yml` с нужными настройками.
 
 **Запуск скрипта на сервере:**
 
 Скрипт можно запустить одной командой прямо с GitHub, не скачивая репозиторий на сервер.
 
-> **Примечание:** Для выполнения первоначальной настройки сервера (установка Docker, создание пользователя) требуются права `sudo`.
+> **Примечание:** Для выполнения скрипта требуются права `sudo`.
 
 Выполните на сервере следующие команды, подставив свои значения:
 
 ```bash
-# 1. Задайте переменные. GITHUB_REPOSITORY должен быть в формате 'owner/repo-name'.
-GITHUB_REPOSITORY="your-github-username/your-repo-name" # Путь к вашему репозиторию на GitHub
-BOT_NAME="bot_main"                                     # Имя для каталога бота на сервере
-BOT_PORT="8001"                                         # Внешний порт на хосте, который будет слушать бот
-CONTAINER_PORT="8080"                                   # Внутренний порт в контейнере (по умолчанию 8080)
-DEPLOY_USER="deploy"                                    # Имя пользователя для деплоя (по умолчанию 'deploy')
+# 1. Задайте переменную с вашим репозиторием
+GITHUB_REPOSITORY="your-github-username/your-repo-name"
 
-# 2. Запустите скрипт с GitHub. Он использует переменную GITHUB_REPOSITORY для настройки.
-sudo env GITHUB_REPOSITORY=$GITHUB_REPOSITORY BOT_NAME=$BOT_NAME BOT_PORT=$BOT_PORT CONTAINER_PORT=$CONTAINER_PORT DEPLOY_USER=$DEPLOY_USER \
+# 2. Запустите скрипт. Он задаст несколько вопросов о конфигурации.
+# Вы можете переопределить имя бота/пользователя (по умолчанию 'bot_main'):
+# sudo env GITHUB_REPOSITORY=$GITHUB_REPOSITORY BOT_NAME=my_bot bash -c "..."
+sudo env GITHUB_REPOSITORY=$GITHUB_REPOSITORY \
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/deploy/bootstrap-server-custom.sh)"
 ```
 

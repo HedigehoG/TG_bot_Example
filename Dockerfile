@@ -1,8 +1,11 @@
 # Используем официальный образ Python
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Устанавливаем рабочую директорию в контейнере
 WORKDIR /app
+
+# Устанавливаем curl для healthcheck и другие зависимости, затем очищаем кэш
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Копируем файл с зависимостями
 COPY requirements.txt .

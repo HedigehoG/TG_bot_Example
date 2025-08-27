@@ -14,15 +14,15 @@
 set -euo pipefail
 
 # --- Глобальные переменные и значения по умолчанию ---
-BOT_NAME=${BOT_NAME:-bot_main}
-# Для лучшей изоляции и простоты назовем пользователя для деплоя так же, как и бота.
-DEPLOY_USER=${BOT_NAME}
+BOT_NAME_DEFAULT="bot_main"
 HOST_PORT_DEFAULT=8001
 CONTAINER_PORT=8080 # Внутренний порт приложения, должен совпадать с тем, что в Dockerfile
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # Пример: my-username/my-cool-repo
-# Рабочей директорией будет домашний каталог пользователя.
-WORK_DIR="/home/${DEPLOY_USER}"
-# Переменные для интерактивного ввода, которые будут заполнены в начале
+
+# Переменные, которые будут определены интерактивно
+BOT_NAME=""
+DEPLOY_USER=""
+WORK_DIR=""
 WEBHOOK_HOST_URL=""
 HOST_PORT=""
 
@@ -45,7 +45,19 @@ validate_input() {
 
 gather_interactive_inputs() {
   echo
-  echo "--- Настройка конфигурации бота ---"
+  echo "--- Настройка конфигурации ---"
+
+  local bot_name_input
+  read -p "Введите имя для вашего бота [${BOT_NAME_DEFAULT}]: " bot_name_input
+  BOT_NAME=${bot_name_input:-${BOT_NAME_DEFAULT}}
+
+  local deploy_user_input
+  read -p "Введите имя пользователя для деплоя (будет создан на сервере) [${BOT_NAME}]: " deploy_user_input
+  DEPLOY_USER=${deploy_user_input:-${BOT_NAME}}
+
+  # Определяем рабочую директорию на основе имени пользователя.
+  # Это должно быть сделано здесь, так как WORK_DIR зависит от DEPLOY_USER.
+  WORK_DIR="/home/${DEPLOY_USER}"
 
   local webhook_input=""
   while [ -z "${webhook_input}" ]; do
@@ -212,6 +224,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      # Даем контейнеру 60 секунд на запуск, прежде чем healthcheck начнет считаться провальным.
+      start_period: 60s
     # Явно указываем DNS-серверы для надежного разрешения имен внутри контейнера.
     # Это решает распространенную проблему "Temporary failure in name resolution".
     dns:
@@ -246,13 +260,13 @@ main() {
   check_root
   validate_input
 
+  # Собираем все интерактивные данные от пользователя в самом начале
+  gather_interactive_inputs
+
   echo "--- Запуск настройки сервера для бота: ${BOT_NAME} ---"
   echo "Пользователь для деплоя: ${DEPLOY_USER}"
   echo "Рабочая директория: ${WORK_DIR}"
   echo "--------------------------------------------------------"
-
-  # Собираем все интерактивные данные от пользователя в самом начале
-  gather_interactive_inputs
 
   install_docker
   setup_deploy_user
