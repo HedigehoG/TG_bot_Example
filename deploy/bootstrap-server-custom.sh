@@ -1,138 +1,207 @@
 #!/bin/bash
+#
 # Скрипт для первоначальной настройки сервера для деплоя Telegram-бота.
-# Устанавливает Docker, создает пользователя для деплоя и настраивает окружение.
+#
+# Что делает скрипт:
+# 1. Проверяет права суперпользователя (root).
+# 2. Устанавливает Docker и Docker Compose, если они отсутствуют.
+# 3. Создает специального пользователя для деплоя.
+# 4. Настраивает SSH-доступ по ключу для этого пользователя, отключая вход по паролю.
+# 5. Генерирует SSH-ключ для деплоя и выводит данные для настройки GitHub Actions Secrets.
+# 6. Создает базовые конфигурационные файлы `.env` и `docker-compose.yml`.
+#
 
 set -euo pipefail
 
-if [ "$(id -u)" -ne 0 ]; then
-  echo "This script must be run as root. Please use sudo." >&2
-  exit 1
-fi
-
+# --- Глобальные переменные и значения по умолчанию ---
 BOT_NAME=${BOT_NAME:-bot_main}
 # Для лучшей изоляции и простоты назовем пользователя для деплоя так же, как и бота.
 DEPLOY_USER=${BOT_NAME}
-BOT_PORT=${BOT_PORT:-8001}
-CONTAINER_PORT=${CONTAINER_PORT:-8080} 
-GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # e.g., my-username/my-cool-repo
-
-if [ -z "${GITHUB_REPOSITORY}" ] || [[ ! "${GITHUB_REPOSITORY}" == */* ]]; then
-  echo "Error: GitHub repository is not set or has an invalid format."
-  echo "Please provide it via the GITHUB_REPOSITORY environment variable."
-  echo "Usage: sudo GITHUB_REPOSITORY=your-username/your-repo-name ./bootstrap-server-custom.sh"
-  exit 1
-fi
-# Convert to lowercase to match GitHub Actions behavior for ghcr.io images.
-GITHUB_REPOSITORY=${GITHUB_REPOSITORY,,}
-
+HOST_PORT_DEFAULT=8001
+CONTAINER_PORT=8080 # Внутренний порт приложения, должен совпадать с тем, что в Dockerfile
+GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # Пример: my-username/my-cool-repo
 # Рабочей директорией будет домашний каталог пользователя.
 WORK_DIR="/home/${DEPLOY_USER}"
+# Переменные для интерактивного ввода, которые будут заполнены в начале
+WEBHOOK_HOST_URL=""
+HOST_PORT=""
 
-echo "Запуск настройки: WORK_DIR=${WORK_DIR}, DEPLOY_USER=${DEPLOY_USER}, BOT_NAME=${BOT_NAME}"
 
-# install docker (same as generic)
-if ! command -v docker >/dev/null 2>&1; then
+check_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Ошибка: Этот скрипт должен выполняться с правами root. Пожалуйста, используйте sudo." >&2
+    exit 1
+  fi
+}
+
+validate_input() {
+  if [ -z "${GITHUB_REPOSITORY}" ] || [[ ! "${GITHUB_REPOSITORY}" == */* ]]; then
+    echo "Ошибка: Переменная GITHUB_REPOSITORY не задана или имеет неверный формат." >&2
+    echo "Пожалуйста, укажите ее в формате 'имя-пользователя/имя-репозитория'." >&2
+    echo "Пример: sudo GITHUB_REPOSITORY=your-username/your-repo-name ${0}" >&2
+    exit 1
+  fi
+}
+
+gather_interactive_inputs() {
+  echo
+  echo "--- Настройка конфигурации бота ---"
+
+  local webhook_input=""
+  while [ -z "${webhook_input}" ]; do
+    read -p "Введите публичный URL для вебхука (например, https://my-bot.example.com): " webhook_input
+    if [ -z "${webhook_input}" ]; then
+      echo "URL не может быть пустым. Пожалуйста, попробуйте снова." >&2
+    fi
+  done
+  WEBHOOK_HOST_URL=${webhook_input}
+
+  local host_port_input
+  read -p "Введите внешний порт для бота (на хосте) [${HOST_PORT_DEFAULT}]: " host_port_input
+  HOST_PORT=${host_port_input:-${HOST_PORT_DEFAULT}}
+}
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    echo "Docker уже установлен. Пропускаем установку."
+    return
+  fi
+
+  echo "Установка Docker..."
   apt-get update
   apt-get install -y ca-certificates curl gnupg lsb-release
-  mkdir -p /etc/apt/keyrings
+
+  install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+
   # Примечание: Скрипт адаптирован для Ubuntu. Для других Debian-based систем 'ubuntu' может потребоваться заменить на 'debian'.
-  tee /etc/apt/sources.list.d/docker.list > /dev/null <<EOF
-deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable
-EOF
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable --now docker
-fi
+  echo "Docker успешно установлен и запущен."
+}
 
-# create user if not exists
-if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
-  echo "Пользователь ${DEPLOY_USER} не найден. Создание..."
+display_github_secrets() {
+  local deploy_key_path="$1"
+  # Пытаемся получить публичный IPv4. Если не вышло, ищем первый IPv4 в выводе hostname -I.
+  local ssh_host
+  ssh_host=$(curl -4s ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
+
+  echo
+  echo "====================== Секреты для GitHub Actions ======================"
+  echo "Добавьте следующие секреты в настройки вашего репозитория на GitHub:"
+  echo "--------------------------------------------------------------------"
+  echo "SSH_HOST: ${ssh_host}"
+  echo "SSH_USER: ${DEPLOY_USER}"
+  echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
+  echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
+  echo
+  echo "===================================================================="
+  cat "${deploy_key_path}"
+  echo
+  echo "===================================================================="
+  # Приватный ключ остается на сервере в /home/${DEPLOY_USER}/.ssh/ на случай,
+  # если потребуется его скопировать снова.
+}
+
+setup_deploy_user() {
+  if id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
+    echo "Пользователь ${DEPLOY_USER} уже существует. Пропускаем создание."
+    return
+  fi
+
+  echo "Создание пользователя для деплоя: ${DEPLOY_USER}..."
   # Флаг -m создает домашнюю директорию, которая и будет нашей WORK_DIR.
   useradd -m -s /bin/bash -d "${WORK_DIR}" "${DEPLOY_USER}"
-  # Add user to docker group to manage containers without sudo
   usermod -aG docker "${DEPLOY_USER}"
   echo "Пользователь ${DEPLOY_USER} создан и добавлен в группу docker."
 
-  # Create .ssh directory and authorized_keys file
-  SSH_DIR="/home/${DEPLOY_USER}/.ssh"
-  mkdir -p "${SSH_DIR}"
-  touch "${SSH_DIR}/authorized_keys"
-  chmod 700 "${SSH_DIR}"
-  chmod 600 "${SSH_DIR}/authorized_keys"
-  chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
+  # Настройка SSH для входа по ключу
+  local ssh_dir="${WORK_DIR}/.ssh"
+  install -d -m 700 -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" "${ssh_dir}"
+  touch "${ssh_dir}/authorized_keys"
+  chmod 600 "${ssh_dir}/authorized_keys"
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${ssh_dir}/authorized_keys"
   echo "Создана директория SSH для пользователя ${DEPLOY_USER}."
 
-  # Ensure PubkeyAuthentication is enabled in sshd_config and restart sshd.
-  # This is crucial for the deployment key to work.
-  if grep -qE '^\s*#?\s*PubkeyAuthentication' /etc/ssh/sshd_config; then
-    sed -i -E 's/^\s*#?\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-  else
-    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
-  fi
-  if grep -qE '^\s*#?\s*PasswordAuthentication' /etc/ssh/sshd_config; then
-    sed -i -E 's/^\s*#?\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-  fi
+  # Включаем аутентификацию по ключу и отключаем по паролю в sshd
+  echo "Настройка SSH сервера для безопасного доступа..."
+  sed -i -E 's/^\s*#?\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+  sed -i -E 's/^\s*#?\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  # Добавляем строку, если она вдруг отсутствует
+  grep -qE "^\s*PubkeyAuthentication" /etc/ssh/sshd_config || echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
   systemctl restart sshd
-  echo "SSH server reconfigured to accept public key authentication."
+  echo "SSH сервер перенастроен для аутентификации по публичному ключу."
 
-  # --- Генерация ключей ---
-  # 1. Генерируем ключ для деплоя в формате PEM для совместимости с GitHub Actions
+  # Генерация и настройка ключа для деплоя
   echo "Генерация ключа для деплоя (формат PEM для GitHub Actions)..."
-  DEPLOY_KEY_PATH="${SSH_DIR}/id_ed25519_deploy"
-  ssh-keygen -m PEM -t ed25519 -f "${DEPLOY_KEY_PATH}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
- 
-  # Добавляем публичный ключ в authorized_keys
-  cat "${DEPLOY_KEY_PATH}.pub" >> "${SSH_DIR}/authorized_keys"
+  local deploy_key_path="${ssh_dir}/id_ed25519_deploy"
+  ssh-keygen -m PEM -t ed25519 -f "${deploy_key_path}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
 
-  chown -R ${DEPLOY_USER}:${DEPLOY_USER} "${SSH_DIR}"
-  echo "Ключ для деплоя сгенерирован и авторизован."
+  cat "${deploy_key_path}.pub" >> "${ssh_dir}/authorized_keys"
+  chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${ssh_dir}"
+  echo "Ключ для деплоя сгенерирован и добавлен в authorized_keys."
 
-  echo "====================== GitHub Actions Secrets ======================"
-  echo "Add the following secrets to your GitHub repository settings:"
-  echo "--------------------------------------------------------------------"
-  # Пытаемся получить публичный IPv4. Если не вышло, ищем первый IPv4 в выводе hostname -I.
-  echo "SSH_HOST: $(curl -4s ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')"
-  echo "SSH_USER: ${DEPLOY_USER}"
-  echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
-  echo "Скопируйте всё, что находится между линиями, включая 'BEGIN' и 'END' и пустую строку после ключа."
-  echo "Этот ключ предназначен ТОЛЬКО для GitHub Actions."
-  echo "" # Add a blank line for easier copying
-  cat "${DEPLOY_KEY_PATH}"
-  echo "" # Add a blank line for easier copying
-  echo "===================================================================="
-  # Securely remove the private key from the server after displaying it
-  # We are commenting this line out to prevent issues with incorrectly copied keys.
-  # The private key will remain in /home/${DEPLOY_USER}/.ssh/ for later retrieval if needed.
-  # rm -f "${DEPLOY_KEY_PATH}"
-fi
+  display_github_secrets "${deploy_key_path}"
+}
 
-# sample env and compose
-if [ ! -f "${WORK_DIR}/.env" ]; then
-  cat > "${WORK_DIR}/.env" <<ENV
+create_env_file() {
+  local env_file="${WORK_DIR}/.env"
+  if [ -f "${env_file}" ]; then
+    echo ".env файл уже существует. Пропускаем создание."
+    return
+  fi
+
+  echo "Создание .env файла в ${WORK_DIR}"
+
+  cat > "${env_file}" <<ENV
+# Этот файл содержит переменные окружения для вашего бота.
 # BOT_TOKEN будет автоматически добавлен во время деплоя из GitHub Secrets.
-# WEBHOOK_HOST должен указывать на публичный адрес вашего сервера, например https://my-first-bot.your-domain.com
-WEBHOOK_HOST=https://${BOT_NAME}.example.com
-# PORT - это порт, который слушает приложение ВНУТРИ контейнера.
-PORT=${CONTAINER_PORT}
-# HOST - это адрес, который слушает приложение ВНУТРИ контейнера. 0.0.0.0 - стандарт для Docker.
-HOST=0.0.0.0
-ENV
-  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/.env"
-fi
 
-if [ ! -f "${WORK_DIR}/docker-compose.yml" ]; then
-  cat > "${WORK_DIR}/docker-compose.yml" <<YML
+# Публичный URL, на который Telegram будет отправлять обновления.
+WEBHOOK_HOST=${WEBHOOK_HOST_URL}
+
+# Порт на хост-машине, который будет пробрасываться в контейнер.
+BOT_PORT=${HOST_PORT}
+
+# Внутренний порт, на котором приложение слушает внутри контейнера.
+# Это значение должно совпадать с переменной CONTAINER_PORT в docker-compose.yml.
+LISTEN_PORT=${CONTAINER_PORT}
+ENV
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${env_file}"
+  echo ".env файл создан."
+}
+
+create_docker_compose_file() {
+  local compose_file="${WORK_DIR}/docker-compose.yml"
+  if [ -f "${compose_file}" ]; then
+    echo "docker-compose.yml файл уже существует. Пропускаем создание."
+    return
+  fi
+
+  echo "Создание docker-compose.yml в ${WORK_DIR}"
+  # Приводим имя репозитория к нижнему регистру, как это делает ghcr.io
+  local bot_image="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+
+  # Важно: \${VAR} используется для того, чтобы переменные окружения
+  # (BOT_IMAGE, BOT_PORT) были подставлены утилитой docker-compose при запуске,
+  # а не самим bash-скриптом при создании файла.
+  cat > "${compose_file}" <<YML
 services:
   bot:
-    # Имя образа будет передаваться через переменную окружения BOT_IMAGE во время деплоя
-    image: ${BOT_IMAGE:-ghcr.io/${GITHUB_REPOSITORY}:latest}
+    # Имя образа будет передаваться через переменную окружения BOT_IMAGE во время деплоя.
+    # Здесь мы указываем значение по умолчанию для локальных запусков.
+    image: \${BOT_IMAGE:-${bot_image}}
     env_file:
       - .env
     ports:
-      - "${BOT_PORT}:${CONTAINER_PORT}" # Проброс порта с хоста (BOT_PORT) в контейнер (CONTAINER_PORT)
+      # Проброс порта с хоста (переменная из .env) в контейнер (константа).
+      - "\${BOT_PORT}:${CONTAINER_PORT}"
     restart: unless-stopped
-    # Ограничиваем использование памяти для защиты сервера
+    # Ограничиваем ресурсы для защиты сервера от перегрузки.
     mem_limit: 150m
     memswap_limit: 300m
     healthcheck:
@@ -144,9 +213,10 @@ services:
       timeout: 10s
       retries: 3
     # Явно указываем DNS-серверы для надежного разрешения имен внутри контейнера.
-    # Это решает проблему "Temporary failure in name resolution".
+    # Это решает распространенную проблему "Temporary failure in name resolution".
     dns:
       - 8.8.8.8
+      - 1.1.1.1 # Резервный DNS-сервер
     networks:
       - botnet
 
@@ -154,12 +224,42 @@ networks:
   botnet:
     driver: bridge
 YML
-  chown ${DEPLOY_USER}:${DEPLOY_USER} "${WORK_DIR}/docker-compose.yml"
-fi
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${compose_file}"
+  echo "docker-compose.yml файл создан."
+}
 
-echo "Bootstrap completed."
-echo "Next steps:"
-echo "1. Add the secrets displayed above to your GitHub repository."
-echo "2. IMPORTANT: Add your bot's token as a GitHub Secret named 'BOT_TOKEN'."
-echo "3. Edit the placeholder values in ${WORK_DIR}/.env on the server (e.g., WEBHOOK_HOST)."
-echo "4. Push to the 'main' branch to trigger the deployment."
+print_summary() {
+  echo
+  echo "===================================================================="
+  echo "Первоначальная настройка сервера завершена!"
+  echo "===================================================================="
+  echo
+  echo "Следующие шаги:"
+  echo "1. Добавьте секреты, показанные выше, в настройки вашего репозитория GitHub."
+  echo "   (Settings -> Secrets and variables -> Actions -> New repository secret)"
+  echo "2. ВАЖНО: Добавьте токен вашего бота как секрет GitHub с именем 'BOT_TOKEN'."
+  echo "3. Проверьте и при необходимости отредактируйте файл ${WORK_DIR}/.env на сервере."
+  echo "4. Отправьте изменения в ветку 'main' (или другую основную ветку), чтобы запустить деплой."
+}
+
+main() {
+  check_root
+  validate_input
+
+  echo "--- Запуск настройки сервера для бота: ${BOT_NAME} ---"
+  echo "Пользователь для деплоя: ${DEPLOY_USER}"
+  echo "Рабочая директория: ${WORK_DIR}"
+  echo "--------------------------------------------------------"
+
+  # Собираем все интерактивные данные от пользователя в самом начале
+  gather_interactive_inputs
+
+  install_docker
+  setup_deploy_user
+  create_env_file
+  create_docker_compose_file
+  print_summary
+}
+
+# --- Точка входа в скрипт ---
+main "$@"

@@ -16,10 +16,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 # Публичный адрес, на который Telegram будет отправлять обновления
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
-# Хост и порт, которые будет слушать наше приложение ВНУТРИ контейнера
+# Хост, который будет слушать наше приложение ВНУТРИ контейнера
 LISTEN_HOST = os.getenv('HOST', '0.0.0.0')
-LISTEN_PORT = int(os.getenv('PORT', 8080))
-
+# Внутренний порт приложения. Для Docker-окружения это значение обычно является
+# константой, но мы берем его из .env для единообразия.
+# Внешний порт настраивается через проброс портов в Docker.
+LISTEN_PORT = int(os.getenv('LISTEN_PORT', '8080'))
 if not BOT_TOKEN or not WEBHOOK_HOST:
     raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in your environment (.env file)')
 
@@ -69,7 +71,6 @@ async def on_shutdown(app: web.Application):
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle)
 app.router.add_get("/health", health_check)
-app.router.add_get('/', lambda request: web.Response(text='tg-webhook-bot: ok'))
 # ---------------------------
 
 app.on_startup.append(on_startup)
