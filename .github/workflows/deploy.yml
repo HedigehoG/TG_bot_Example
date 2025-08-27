@@ -97,8 +97,11 @@ jobs:
               IMAGE_TAG="${{ needs.build.outputs.image_tag_sha }}"
             fi
 
-            export BOT_IMAGE="ghcr.io/${{ github.repository }}:$IMAGE_TAG"
-            echo "--- Deploying image: $BOT_IMAGE"
+            # ghcr.io требует, чтобы имена репозиториев были в нижнем регистре.
+            REPO_LOWERCASE=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+            export BOT_IMAGE="ghcr.io/$REPO_LOWERCASE:$IMAGE_TAG"
+
+            echo "--- Deploying image: ${BOT_IMAGE}"
 
             echo "--- Updating .env file with BOT_TOKEN"
             sed -i '/^#\?BOT_TOKEN=/d' .env
