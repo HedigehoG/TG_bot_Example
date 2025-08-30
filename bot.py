@@ -24,13 +24,13 @@ LISTEN_HOST = os.getenv('HOST', '0.0.0.0')
 # Внешний порт настраивается через проброс портов в Docker.
 LISTEN_PORT = int(os.getenv('LISTEN_PORT', '8080'))
 # Секретный токен для верификации вебхуков. Для простоты можно использовать токен бота.
-# В продакшене лучше сгенерировать отдельный секрет и добавить в .env.
-WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', BOT_TOKEN)
+# Скрипт bootstrap-server-custom.sh генерирует его автоматически.
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET')
 
-if not BOT_TOKEN or not WEBHOOK_HOST:
-    raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in your environment (.env file)')
+if not all([BOT_TOKEN, WEBHOOK_HOST, WEBHOOK_SECRET]):
+    raise SystemExit('ОШИБКА: Убедитесь, что переменные BOT_TOKEN, WEBHOOK_HOST и WEBHOOK_SECRET заданы в .env файле или окружении.')
 if not WEBHOOK_HOST.startswith("https://"):
-    logging.warning("WEBHOOK_HOST does not start with https://. Telegram requires HTTPS for webhooks.")
+    logging.warning("WEBHOOK_HOST не начинается с https://. Telegram требует HTTPS для вебхуков.")
 
 # Используем простой и статический путь. Маршрутизация будет осуществляться через поддомен.
 WEBHOOK_PATH = "/webhook"
