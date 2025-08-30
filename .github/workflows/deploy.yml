@@ -87,6 +87,12 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then echo "::error title=Missing Secret::SSH_HOST is not set."; exit 1; fi
+          if [ -z "${{ secrets.SSH_USER }}" ]; then echo "::error title=Missing Secret::SSH_USER is not set."; exit 1; fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then echo "::error title=Missing Secret::SSH_PRIVATE_KEY is not set."; exit 1; fi
+          if [ -z "${{ secrets.BOT_TOKEN }}" ]; then echo "::error title=Missing Secret::BOT_TOKEN is not set."; exit 1; fi
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -95,7 +101,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            cd ${{ secrets.WORK_DIR }}
+            cd /home/${{ secrets.SSH_USER }}
             
             # Определяем, какой образ разворачивать.
             # Для 'deploy_only' берем 'latest', для остальных - конкретный тег сборки.
@@ -125,6 +131,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'stop'
     runs-on: ubuntu-latest
     steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then echo "::error title=Missing Secret::SSH_HOST is not set."; exit 1; fi
+          if [ -z "${{ secrets.SSH_USER }}" ]; then echo "::error title=Missing Secret::SSH_USER is not set."; exit 1; fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then echo "::error title=Missing Secret::SSH_PRIVATE_KEY is not set."; exit 1; fi
       - name: Stop bot on server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -133,7 +144,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            cd ${{ secrets.WORK_DIR }}
+            cd /home/${{ secrets.SSH_USER }}
             echo "--- Stopping bot..."
             docker compose down
             echo "--- Bot stopped."

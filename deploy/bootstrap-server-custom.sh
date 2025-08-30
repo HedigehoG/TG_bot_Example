@@ -34,6 +34,13 @@ check_root() {
   fi
 }
 
+ _get_server_public_ip() {
+  # Пытаемся получить публичный IPv4 с таймаутом. Если не вышло, ищем первый IPv4 в выводе hostname -I.
+  # Команда `host` используется для проверки DNS, поэтому она должна быть доступна.
+  command -v host >/dev/null 2>&1 || { echo "Установка dnsutils (для команды 'host')..."; apt-get -qq update && apt-get -qq install -y dnsutils; }
+  curl -4s --max-time 5 ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}'
+}
+
 validate_input() {
   if [ -z "${GITHUB_REPOSITORY}" ] || [[ ! "${GITHUB_REPOSITORY}" == */* ]]; then
     echo "Ошибка: Переменная GITHUB_REPOSITORY не задана или имеет неверный формат." >&2
@@ -59,12 +66,51 @@ gather_interactive_inputs() {
   # Это должно быть сделано здесь, так как WORK_DIR зависит от DEPLOY_USER.
   WORK_DIR="/home/${DEPLOY_USER}"
 
+  local server_ip
+  server_ip=$(_get_server_public_ip)
+  if [ -z "${server_ip}" ]; then
+      echo "Предупреждение: не удалось определить публичный IP-адрес сервера. Проверка домена будет неполной." >&2
+  else
+      echo "Обнаружен публичный IP сервера: ${server_ip}"
+  fi
+
   local webhook_input=""
-  while [ -z "${webhook_input}" ]; do
+  while true; do
     read -p "Введите публичный URL для вебхука (например, https://my-bot.example.com): " webhook_input
     if [ -z "${webhook_input}" ]; then
       echo "URL не может быть пустым. Пожалуйста, попробуйте снова." >&2
+      continue
     fi
+
+    # Извлекаем хост из URL (убираем протокол, путь и порт)
+    local hostname
+    hostname=$(echo "${webhook_input}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
+    if [ -z "${hostname}" ]; then
+        echo "Не удалось извлечь имя хоста из URL. Пожалуйста, введите корректный URL (например, https://domain.com)." >&2
+        continue
+    fi
+
+    echo "Проверка DNS для хоста '${hostname}'..."
+    local resolved_ip
+    resolved_ip=$(host -t A "${hostname}" | awk '/has address/ {print $4; exit}')
+
+    if [ -z "${resolved_ip}" ]; then
+      echo "Ошибка: не удалось разрешить доменное имя '${hostname}' в IP-адрес." >&2
+      echo "Убедитесь, что для этого домена настроена A-запись в вашей DNS-зоне и она успела обновиться." >&2
+      continue
+    fi
+
+    echo "Домен '${hostname}' успешно разрешен в IP-адрес: ${resolved_ip}"
+
+    if [ -n "${server_ip}" ] && [ "${resolved_ip}" != "${server_ip}" ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: IP-адрес домена (${resolved_ip}) НЕ совпадает с IP-адресом этого сервера (${server_ip})." >&2
+        echo "Это нормально, если вы используете прокси (например, Cloudflare), но может быть ошибкой." >&2
+        read -p "Вы уверены, что хотите использовать этот URL? (y/N): " choice
+        [[ "${choice}" =~ ^[Yy]$ ]] || continue
+    elif [ -n "${server_ip}" ]; then # Подразумевается, что resolved_ip == server_ip
+        echo "Отлично! IP-адрес домена совпадает с IP-адресом сервера."
+    fi
+    break # Все проверки пройдены, выходим из цикла
   done
   WEBHOOK_HOST_URL=${webhook_input}
 
@@ -100,7 +146,7 @@ display_github_secrets() {
   local deploy_key_path="$1"
   # Пытаемся получить публичный IPv4 с таймаутом. Если не вышло, ищем первый IPv4 в выводе hostname -I.
   local ssh_host
-  ssh_host=$(curl -4s --max-time 5 ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
+  ssh_host=$(_get_server_public_ip)
 
   echo
   echo "====================== Секреты для GitHub Actions ======================"
@@ -108,7 +154,6 @@ display_github_secrets() {
   echo "--------------------------------------------------------------------"
   echo "SSH_HOST: ${ssh_host}"
   echo "SSH_USER: ${DEPLOY_USER}"
-  echo "WORK_DIR: ${WORK_DIR}"
 
   echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
   echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
@@ -251,6 +296,23 @@ YML
   echo "docker-compose.yml файл создан."
 }
 
+display_caddy_config() {
+  # Извлекаем только хост из полного URL
+  local hostname
+  hostname=$(echo "${WEBHOOK_HOST_URL}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
+
+  echo
+  echo "================== Пример конфигурации для реверс-прокси Caddy =================="
+  echo "Если вы используете Caddy, добавьте этот блок в ваш Caddyfile"
+  echo "(обычно /etc/caddy/Caddyfile) и перезапустите Caddy (systemctl reload caddy):"
+  echo "--------------------------------------------------------------------------------"
+  # Используем printf для форматирования, чтобы избежать проблем с отступами
+  printf "\n%s {\n    reverse_proxy localhost:%s\n}\n\n" "${hostname}" "${HOST_PORT}"
+  echo "--------------------------------------------------------------------------------"
+  echo "Caddy автоматически получит и будет обновлять для вас SSL-сертификат."
+  echo
+}
+
 print_summary() {
   echo
   echo "===================================================================="
@@ -258,6 +320,9 @@ print_summary() {
   echo "===================================================================="
   echo
   echo "Следующие шаги:"
+
+  display_caddy_config
+
   echo "1. Добавьте секреты, показанные выше, в настройки вашего репозитория GitHub."
   echo "   (Settings -> Secrets and variables -> Actions -> New repository secret)"
   echo "2. ВАЖНО: Добавьте токен вашего бота как секрет GitHub с именем 'BOT_TOKEN'."
