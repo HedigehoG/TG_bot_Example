@@ -3,11 +3,17 @@
 # Текущая просто последняя 3я версия
 FROM python:3-slim
 
+# Устанавливаем системные зависимости, которые отсутствуют в 'slim' образе,
+# но необходимы для надежной работы entrypoint и healthcheck.
+# - dnsutils: предоставляет утилиту 'host' для проверки DNS в entrypoint.sh.
+# - curl: используется в healthcheck для проверки состояния приложения.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dnsutils \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Устанавливаем рабочую директорию в контейнере
 WORKDIR /app
-
-# Устанавливаем curl для healthcheck и другие зависимости, затем очищаем кэш
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Копируем файл с зависимостями
 COPY requirements.txt .
