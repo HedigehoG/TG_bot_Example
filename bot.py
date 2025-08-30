@@ -70,13 +70,14 @@ async def handle(request: web.Request) -> web.Response:
 async def on_startup(app: web.Application):
     # При запуске бота удаляем старые, неотвеченные апдейты,
     # и устанавливаем вебхук с секретным токеном.
+    # Entrypoint скрипт уже дождался доступности сети, поэтому сложный цикл повторов здесь не нужен.
     app['bot'] = bot
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
-        logging.info('Webhook set to %s', WEBHOOK_URL)
+        logging.info('Webhook successfully set to %s', WEBHOOK_URL)
     except Exception as e:
-        logging.error("CRITICAL: Failed to set webhook on startup: %s", e, exc_info=True)
+        logging.critical("Failed to set webhook on startup despite network being ready: %s", e, exc_info=True)
 
 async def health_check(request):
     """Простой ответ для healthcheck'а от Docker."""

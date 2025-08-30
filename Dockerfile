@@ -18,5 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем остальной код приложения
 COPY . .
 
-# Команда для запуска приложения
+# Делаем скрипт-обертку исполняемым. Он уже скопирован в /app вместе со всем кодом.
+RUN chmod +x ./entrypoint.sh
+
+# Теперь entrypoint.sh будет запускаться первым, а затем он запустит команду из CMD.
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "bot.py"]
