@@ -10,17 +10,23 @@ WAIT_TIMEOUT=100 # 100 секунд - максимальное время ожи
 wait_for_dns() {
     local target_host="$1"
     echo "Entrypoint: Waiting for DNS resolution for '${target_host}'..."
-    local start_time
-    start_time=$(date +%s)
-    # Используем `+nodnssec`, чтобы избежать ошибок SERVFAIL с DuckDNS
-    while ! host +nodnssec "${target_host}" > /dev/null 2>&1; do
-        local current_time
-        current_time=$(date +%s)
-        local elapsed_time
-        elapsed_time=$((current_time - start_time))
+    local start_time=$(date +%s)
+
+    # Используем `getent hosts` вместо `host`. `getent` использует стандартные
+    # системные библиотеки для разрешения имен (NSS), так же, как и большинство
+    # приложений. Это более надежный способ, чем `host` или `dig`.
+    while ! getent hosts "${target_host}" > /dev/null 2>&1; do
+        local current_time=$(date +%s)
+        local elapsed_time=$((current_time - start_time))
 
         if [ ${elapsed_time} -ge ${WAIT_TIMEOUT} ]; then
             echo "Entrypoint: Timeout! Host '${target_host}' not resolvable after ${WAIT_TIMEOUT} seconds."
+            echo "Entrypoint: Please check container's network and DNS settings."
+            # Выводим содержимое /etc/resolv.conf для упрощения отладки.
+            # Это покажет, какие DNS-серверы использует контейнер.
+            echo "--- Contents of /etc/resolv.conf ---"
+            cat /etc/resolv.conf || echo "Could not read /etc/resolv.conf"
+            echo "------------------------------------"
             exit 1
         fi
 

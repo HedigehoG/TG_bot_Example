@@ -126,6 +126,16 @@ jobs:
             echo "--- Restarting container"
             docker compose up -d --force-recreate --remove-orphans
 
+            echo "--- Waiting for container to initialize..."
+            sleep 15
+
+            echo "--- First 20 lines of container log ---"
+            # docker compose ps -q bot вернет ID контейнера для сервиса 'bot'.
+            # docker logs без флага -f выводит текущие логи и завершается.
+            # head -n 20 отбирает первые 20 строк.
+            docker logs "$(docker compose ps -q bot)" | head -n 20
+            echo "---------------------------------------"
+
             echo "--- Pruning old images"
             docker image prune -af
 
