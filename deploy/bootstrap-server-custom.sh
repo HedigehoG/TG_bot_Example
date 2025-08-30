@@ -154,6 +154,7 @@ display_github_secrets() {
   echo "--------------------------------------------------------------------"
   echo "SSH_HOST: ${ssh_host}"
   echo "SSH_USER: ${DEPLOY_USER}"
+  echo "CLEANUP_COMMAND: sudo /usr/local/bin/cleanup-${DEPLOY_USER} ${DEPLOY_USER}"
 
   echo "---------------------- SSH_PRIVATE_KEY (КРИТИЧЕСКИ ВАЖНО!) ------------------"
   echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
@@ -211,6 +212,29 @@ setup_deploy_user() {
   display_github_secrets "${deploy_key_path}"
 }
 
+setup_cleanup_script() {
+  echo "Настройка скрипта для удаления..."
+  local cleanup_script_source_path
+  # Определяем путь к исходному скрипту очистки относительно текущего скрипта
+  cleanup_script_source_path="$(dirname "$0")/cleanup-server.sh"
+
+  if [ ! -f "${cleanup_script_source_path}" ]; then
+    echo "Ошибка: Скрипт очистки 'cleanup-server.sh' не найден в директории 'deploy'." >&2
+    exit 1
+  fi
+
+  local cleanup_script_dest_path="/usr/local/bin/cleanup-${DEPLOY_USER}"
+  cp "${cleanup_script_source_path}" "${cleanup_script_dest_path}"
+  chmod +x "${cleanup_script_dest_path}"
+
+  # Настройка sudo для безопасного запуска скрипта очистки из GitHub Actions
+  local sudoers_file="/etc/sudoers.d/99-${DEPLOY_USER}-cleanup"
+  echo "Предоставление прав на выполнение скрипта очистки через sudo..."
+  echo "${DEPLOY_USER} ALL=(ALL) NOPASSWD: ${cleanup_script_dest_path} ${DEPLOY_USER}" > "${sudoers_file}"
+  chmod 0440 "${sudoers_file}"
+  echo "Скрипт очистки настроен. Команда для запуска добавлена в вывод секретов."
+}
+
 create_env_file() {
   local env_file="${WORK_DIR}/.env"
   if [ -f "${env_file}" ]; then
@@ -227,7 +251,6 @@ create_env_file() {
 
   cat > "${env_file}" <<ENV
 # Этот файл содержит переменные окружения для вашего бота.
-# BOT_TOKEN будет автоматически добавлен во время деплоя из GitHub Secrets.
 
 # Имя бота, используется для docker-compose (например, для имени контейнера).
 BOT_NAME=${BOT_NAME}
@@ -245,6 +268,8 @@ BOT_PORT=${HOST_PORT}
 # Внутренний порт, на котором приложение слушает внутри контейнера.
 # Это значение должно совпадать с переменной CONTAINER_PORT в docker-compose.yml.
 LISTEN_PORT=${CONTAINER_PORT}
+
+# BOT_TOKEN будет автоматически добавлен в конец этого файла во время деплоя из GitHub Secrets.
 ENV
   chown "${DEPLOY_USER}:${DEPLOY_USER}" "${env_file}"
   echo ".env файл создан."
@@ -337,7 +362,7 @@ print_summary() {
 
   echo "1. Добавьте секреты, показанные выше, в настройки вашего репозитория GitHub."
   echo "   (Settings -> Secrets and variables -> Actions -> New repository secret)"
-  echo "2. ВАЖНО: Добавьте токен вашего бота как секрет GitHub с именем 'BOT_TOKEN'."
+  echo "2. ВАЖНО: Добавьте следующие секреты: 'BOT_TOKEN' (токен от @BotFather) и 'CLEANUP_COMMAND' (команда для удаления, выведена выше)."
   echo "3. Проверьте и при необходимости отредактируйте файл ${WORK_DIR}/.env на сервере."
   echo "4. Отправьте изменения в ветку 'main' (или другую основную ветку), чтобы запустить деплой."
 }
@@ -356,6 +381,7 @@ main() {
 
   install_docker
   setup_deploy_user
+  setup_cleanup_script
   create_env_file
   create_docker_compose_file
   print_summary
