@@ -6,9 +6,13 @@ FROM python:3-slim
 # Устанавливаем системные зависимости, которые отсутствуют в 'slim' образе,
 # но необходимы для надежной работы entrypoint и healthcheck.
 # - dnsutils: предоставляет утилиту 'host' для проверки DNS в entrypoint.sh.
+# - netbase: предоставляет базовые сетевые файлы (например, /etc/services), необходимые для работы 'host'.
 # - curl: используется в healthcheck для проверки состояния приложения.
+# - ca-certificates: необходимы для SSL/TLS верификации.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
+    netbase \
+    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
