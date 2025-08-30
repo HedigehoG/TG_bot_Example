@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 from aiohttp import web
 from dotenv import load_dotenv
 import logging
@@ -49,6 +50,16 @@ async def echo(message: Message):
     text = message.text or '<non-text>'
     await message.answer(f'Вы написали: {text}')
 
+@dp.message(Command(commands=['webhookinfo']))
+async def cmd_webhook_info(message: Message, bot: Bot):
+    """Диагностическая команда для проверки статуса вебхука."""
+    try:
+        info = await bot.get_webhook_info()
+        info_json = json.dumps(info.dict(), indent=2, ensure_ascii=False)
+        await message.answer(f"<pre>{info_json}</pre>", parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"Не удалось получить информацию о вебхуке: {e}")
+
 async def handle(request: web.Request) -> web.Response:
     try:
         # Проверяем секретный токен, который Telegram передает в заголовке
@@ -70,14 +81,29 @@ async def handle(request: web.Request) -> web.Response:
 async def on_startup(app: web.Application):
     # При запуске бота удаляем старые, неотвеченные апдейты,
     # и устанавливаем вебхук с секретным токеном.
-    # Entrypoint скрипт уже дождался доступности сети, поэтому сложный цикл повторов здесь не нужен.
+    # Entrypoint скрипт гарантирует, что наш контейнер имеет доступ к сети.
+    # Однако, DNS-запись нашего домена может еще не распространиться по всему миру,
+    # поэтому серверы Telegram могут не видеть нас сразу.
+    # Добавляем цикл повторных попыток для установки вебхука.
     app['bot'] = bot
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
-        logging.info('Webhook successfully set to %s', WEBHOOK_URL)
-    except Exception as e:
-        logging.critical("Failed to set webhook on startup despite network being ready: %s", e, exc_info=True)
+    max_retries = 7  # Увеличиваем количество попыток
+    for attempt in range(max_retries):
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
+            logging.info('Webhook successfully set to %s', WEBHOOK_URL)
+            # Если установка прошла успешно, выходим из цикла
+            return
+        except Exception as e:
+            logging.error(
+                "Attempt %d/%d: Failed to set webhook. Error: %s",
+                attempt + 1, max_retries, e
+            )
+            if attempt < max_retries - 1:
+                delay = 2 ** (attempt + 1)  # Экспоненциальная задержка: 2, 4, 8, 16, 32, 64 секунд
+                logging.info("Retrying in %d seconds...", delay)
+                await asyncio.sleep(delay)
+    logging.critical("CRITICAL: Could not set webhook after %d attempts. The bot will not receive updates.", max_retries)
 
 async def health_check(request):
     """Простой ответ для healthcheck'а от Docker."""
