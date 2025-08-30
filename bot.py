@@ -63,9 +63,10 @@ async def cmd_webhook_info(message: Message, bot: Bot):
 async def handle(request: web.Request) -> web.Response:
     try:
         # Проверяем секретный токен, который Telegram передает в заголовке
-        # ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ОТЛАДКИ
-        # secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        # if secret_token != WEBHOOK_SECRET: ...
+        secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret_token != WEBHOOK_SECRET:
+            logging.warning("Wrong secret token received: %s", secret_token)
+            return web.Response(status=403)
 
         bot: Bot = request.app['bot']
         update_data = await request.json()
@@ -80,16 +81,16 @@ async def handle(request: web.Request) -> web.Response:
 async def on_startup(app: web.Application):
     # При запуске бота удаляем старые, неотвеченные апдейты,
     # и устанавливаем вебхук с секретным токеном.
-    # ВРЕМЕННО: Упрощенный запуск для отладки без повторных попыток и без secret_token.
     app['bot'] = bot
-    logging.warning("!!! РЕЖИМ ОТЛАДКИ: Попытка установить вебхук один раз и без secret_token. !!!")
+    logging.info("Attempting to set webhook...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        # Временно отключаем передачу secret_token для чистоты эксперимента
-        await bot.set_webhook(url=WEBHOOK_URL)
-        logging.info('Webhook successfully set to %s (БЕЗ secret_token)', WEBHOOK_URL)
+        await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
+        logging.info('Webhook successfully set to %s', WEBHOOK_URL)
     except Exception as e:
         logging.critical("Failed to set webhook on startup: %s", e, exc_info=True)
+        # В данном случае, Docker/docker-compose перезапустит контейнер,
+        # и entrypoint.sh снова будет ждать доступности DNS.
 
 async def health_check(request):
     """Простой ответ для healthcheck'а от Docker."""
