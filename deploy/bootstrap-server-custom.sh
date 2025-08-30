@@ -346,6 +346,13 @@ services:
       # Проброс порта с хоста (переменная из .env) в контейнер (константа).
       - "\${BOT_PORT}:${CONTAINER_PORT}"
     restart: unless-stopped
+    # Настройка ротации логов, чтобы они не занимали все место на диске.
+    # Храним 3 файла логов по 10MB каждый.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Ограничиваем ресурсы для защиты сервера от перегрузки.
     mem_limit: 150m
     memswap_limit: 300m
