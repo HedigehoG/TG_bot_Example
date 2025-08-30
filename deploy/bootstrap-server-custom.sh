@@ -15,17 +15,18 @@ set -euo pipefail
 
 # --- Глобальные переменные и значения по умолчанию ---
 BOT_NAME_DEFAULT="bot_main"
+WEBHOOK_HOST_URL=${WEBHOOK_HOST_URL:-}
 HOST_PORT_DEFAULT=8001
 CONTAINER_PORT=8080 # Внутренний порт приложения, должен совпадать с тем, что в Dockerfile
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-} # Пример: my-username/my-cool-repo
 
 # Переменные, которые будут определены интерактивно
-BOT_NAME=""
-DEPLOY_USER=""
-WORK_DIR=""
-WEBHOOK_HOST_URL=""
-HOST_PORT=""
+BOT_NAME=${BOT_NAME:-}
+DEPLOY_USER=${DEPLOY_USER:-}
+WORK_DIR="" # Определяется на основе DEPLOY_USER
+HOST_PORT=${HOST_PORT:-}
 CLEANUP_COMMAND_VAR=""
+DEPLOY_KEY_PATH=""
 
 
 check_root() {
@@ -51,6 +52,50 @@ validate_input() {
   fi
 }
 
+validate_webhook_url() {
+    local url_to_validate="$1"
+    local server_ip="$2"
+
+    if [ -z "${url_to_validate}" ]; then
+      echo "URL не может быть пустым." >&2
+      return 1
+    fi
+
+    # Извлекаем хост из URL (убираем протокол, путь и порт)
+    local hostname
+    hostname=$(echo "${url_to_validate}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
+    if [ -z "${hostname}" ]; then
+        echo "Не удалось извлечь имя хоста из URL '${url_to_validate}'. Пожалуйста, введите корректный URL (например, https://domain.com)." >&2
+        return 1
+    fi
+
+    echo "Проверка DNS для хоста '${hostname}'..."
+    local resolved_ip
+    resolved_ip=$(host -t A "${hostname}" | awk '/has address/ {print $4; exit}')
+
+    if [ -z "${resolved_ip}" ]; then
+      echo "Ошибка: не удалось разрешить доменное имя '${hostname}' в IP-адрес." >&2
+      echo "Убедитесь, что для этого домена настроена A-запись в вашей DNS-зоне и она успела обновиться." >&2
+      return 1
+    fi
+
+    echo "Домен '${hostname}' успешно разрешен в IP-адрес: ${resolved_ip}"
+
+    if [ -n "${server_ip}" ] && [ "${resolved_ip}" != "${server_ip}" ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: IP-адрес домена (${resolved_ip}) НЕ совпадает с IP-адресом этого сервера (${server_ip})." >&2
+        echo "Это нормально, если вы используете прокси (например, Cloudflare), но может быть ошибкой." >&2
+        # Если скрипт запущен неинтерактивно (stdin не терминал), то просто продолжаем с предупреждением.
+        # Если интерактивно - спрашиваем подтверждение.
+        if [ -t 0 ]; then
+            read -p "Вы уверены, что хотите использовать этот URL? (y/N): " choice
+            [[ "${choice}" =~ ^[Yy]$ ]] || return 1
+        fi
+    elif [ -n "${server_ip}" ]; then # Подразумевается, что resolved_ip == server_ip
+        echo "Отлично! IP-адрес домена совпадает с IP-адресом сервера."
+    fi
+    return 0 # Успешная валидация
+}
+
 gather_interactive_inputs() {
   echo
   echo "--- Настройка конфигурации ---"
@@ -58,10 +103,19 @@ gather_interactive_inputs() {
   local bot_name_input
   read -p "Введите имя для вашего бота [${BOT_NAME_DEFAULT}]: " bot_name_input
   BOT_NAME=${bot_name_input:-${BOT_NAME_DEFAULT}}
+  if [ -z "${BOT_NAME}" ]; then
+    read -p "Введите имя для вашего бота [${BOT_NAME_DEFAULT}]: " bot_name_input
+    BOT_NAME=${bot_name_input:-${BOT_NAME_DEFAULT}}
+  else
+    echo "Используется имя бота из переменной окружения: ${BOT_NAME}"
+  fi
 
-  local deploy_user_input
-  read -p "Введите имя пользователя для деплоя (будет создан на сервере) [${BOT_NAME}]: " deploy_user_input
-  DEPLOY_USER=${deploy_user_input:-${BOT_NAME}}
+  if [ -z "${DEPLOY_USER}" ]; then
+    read -p "Введите имя пользователя для деплоя (будет создан на сервере) [${BOT_NAME}]: " deploy_user_input
+    DEPLOY_USER=${deploy_user_input:-${BOT_NAME}}
+  else
+    echo "Используется пользователь для деплоя из переменной окружения: ${DEPLOY_USER}"
+  fi
 
   # Определяем рабочую директорию на основе имени пользователя.
   # Это должно быть сделано здесь, так как WORK_DIR зависит от DEPLOY_USER.
@@ -75,49 +129,30 @@ gather_interactive_inputs() {
       echo "Обнаружен публичный IP сервера: ${server_ip}"
   fi
 
-  local webhook_input=""
-  while true; do
-    read -p "Введите публичный URL для вебхука (например, https://my-bot.example.com): " webhook_input
-    if [ -z "${webhook_input}" ]; then
-      echo "URL не может быть пустым. Пожалуйста, попробуйте снова." >&2
-      continue
+  if [ -n "${WEBHOOK_HOST_URL}" ]; then
+    echo "Используется URL вебхука из переменной окружения: ${WEBHOOK_HOST_URL}"
+    if ! validate_webhook_url "${WEBHOOK_HOST_URL}" "${server_ip}"; then
+      echo "Ошибка: URL вебхука из переменной окружения не прошел валидацию." >&2
+      exit 1
     fi
+  else
+    local webhook_input=""
+    while true; do
+      read -p "Введите публичный URL для вебхука (например, https://my-bot.example.com): " webhook_input
+      if validate_webhook_url "${webhook_input}" "${server_ip}"; then
+        WEBHOOK_HOST_URL=${webhook_input}
+        break
+      fi
+      echo "Пожалуйста, попробуйте снова." >&2
+    done
+  fi
 
-    # Извлекаем хост из URL (убираем протокол, путь и порт)
-    local hostname
-    hostname=$(echo "${webhook_input}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
-    if [ -z "${hostname}" ]; then
-        echo "Не удалось извлечь имя хоста из URL. Пожалуйста, введите корректный URL (например, https://domain.com)." >&2
-        continue
-    fi
-
-    echo "Проверка DNS для хоста '${hostname}'..."
-    local resolved_ip
-    resolved_ip=$(host -t A "${hostname}" | awk '/has address/ {print $4; exit}')
-
-    if [ -z "${resolved_ip}" ]; then
-      echo "Ошибка: не удалось разрешить доменное имя '${hostname}' в IP-адрес." >&2
-      echo "Убедитесь, что для этого домена настроена A-запись в вашей DNS-зоне и она успела обновиться." >&2
-      continue
-    fi
-
-    echo "Домен '${hostname}' успешно разрешен в IP-адрес: ${resolved_ip}"
-
-    if [ -n "${server_ip}" ] && [ "${resolved_ip}" != "${server_ip}" ]; then
-        echo "ПРЕДУПРЕЖДЕНИЕ: IP-адрес домена (${resolved_ip}) НЕ совпадает с IP-адресом этого сервера (${server_ip})." >&2
-        echo "Это нормально, если вы используете прокси (например, Cloudflare), но может быть ошибкой." >&2
-        read -p "Вы уверены, что хотите использовать этот URL? (y/N): " choice
-        [[ "${choice}" =~ ^[Yy]$ ]] || continue
-    elif [ -n "${server_ip}" ]; then # Подразумевается, что resolved_ip == server_ip
-        echo "Отлично! IP-адрес домена совпадает с IP-адресом сервера."
-    fi
-    break # Все проверки пройдены, выходим из цикла
-  done
-  WEBHOOK_HOST_URL=${webhook_input}
-
-  local host_port_input
-  read -p "Введите внешний порт для бота (на хосте) [${HOST_PORT_DEFAULT}]: " host_port_input
-  HOST_PORT=${host_port_input:-${HOST_PORT_DEFAULT}}
+  if [ -z "${HOST_PORT}" ]; then
+    read -p "Введите внешний порт для бота (на хосте) [${HOST_PORT_DEFAULT}]: " host_port_input
+    HOST_PORT=${host_port_input:-${HOST_PORT_DEFAULT}}
+  else
+    echo "Используется порт хоста из переменной окружения: ${HOST_PORT}"
+  fi
 }
 
 install_docker() {
@@ -141,33 +176,6 @@ install_docker() {
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable --now docker
   echo "Docker успешно установлен и запущен."
-}
-
-display_github_secrets() {
-  local deploy_key_path="$1"
-  # Пытаемся получить публичный IPv4 с таймаутом. Если не вышло, ищем первый IPv4 в выводе hostname -I.
-  local ssh_host
-  ssh_host=$(_get_server_public_ip)
-
-  echo
-  echo "====================== Секреты для GitHub Actions ======================"
-  echo "Добавьте следующие секреты в настройки вашего репозитория на GitHub:"
-  echo "--------------------------------------------------------------------"
-  echo "SSH_HOST: ${ssh_host}"
-  echo "SSH_USER: ${DEPLOY_USER}"
-  echo "CLEANUP_COMMAND: ${CLEANUP_COMMAND_VAR}"
-
-  echo "---------------------- SSH_PRIVATE_KEY (КРИТИЧЕСКИ ВАЖНО!) ------------------"
-  echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
-  echo "ВАЖНО: Секрет в GitHub должен содержать пустую строку после 'END PRIVATE KEY'."
-  echo "Скрипт выводит ее автоматически, просто убедитесь, что скопировали всё."
-  echo
-  echo "===================================================================="
-  cat "${deploy_key_path}"
-  echo
-  echo "===================================================================="
-  # Приватный ключ остается на сервере в /home/${DEPLOY_USER}/.ssh/ на случай,
-  # если потребуется его скопировать снова.
 }
 
 setup_deploy_user() {
@@ -204,30 +212,28 @@ setup_deploy_user() {
   # Генерация и настройка ключа для деплоя
   echo "Генерация ключа для деплоя (формат PEM для GitHub Actions)..."
   local deploy_key_path="${ssh_dir}/id_ed25519_deploy"
+  DEPLOY_KEY_PATH="${deploy_key_path}" # Сохраняем путь в глобальную переменную для print_summary
   ssh-keygen -m PEM -t ed25519 -f "${deploy_key_path}" -N "" -C "deploy-key-${BOT_NAME}@$(hostname)"
 
   cat "${deploy_key_path}.pub" >> "${ssh_dir}/authorized_keys"
   chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${ssh_dir}"
   echo "Ключ для деплоя сгенерирован и добавлен в authorized_keys."
-
-  display_github_secrets "${deploy_key_path}"
 }
 
 setup_cleanup_script() {
   echo "Настройка скрипта для удаления..."
-  # Определяем абсолютный путь к директории, где находится текущий скрипт.
-  # Это самый надежный способ, который работает независимо от того, как и откуда был запущен скрипт.
-  local script_dir
-  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-  local cleanup_script_source_path="${script_dir}/cleanup-server.sh"
+  # Так как bootstrap-скрипт запускается через curl, он не может найти локальные файлы.
+  # Мы загружаем скрипт очистки напрямую из GitHub репозитория.
+  local cleanup_script_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/deploy/cleanup-server.sh"
+  local cleanup_script_dest_path="${WORK_DIR}/cleanup-server.sh"
 
-  if [ ! -f "${cleanup_script_source_path}" ]; then
-    echo "Ошибка: Скрипт очистки 'cleanup-server.sh' не найден в директории 'deploy'." >&2
+  echo "Загрузка скрипта очистки с ${cleanup_script_url}..."
+  if ! curl -fsSL "${cleanup_script_url}" -o "${cleanup_script_dest_path}"; then
+    echo "Ошибка: Не удалось загрузить скрипт очистки 'cleanup-server.sh'." >&2
+    echo "Убедитесь, что репозиторий ${GITHUB_REPOSITORY} публичный и содержит этот файл в ветке 'main'." >&2
     exit 1
   fi
 
-  local cleanup_script_dest_path="${WORK_DIR}/cleanup-server.sh"
-  cp "${cleanup_script_source_path}" "${cleanup_script_dest_path}"
   chmod +x "${cleanup_script_dest_path}"
   chown "${DEPLOY_USER}:${DEPLOY_USER}" "${cleanup_script_dest_path}"
 
@@ -355,6 +361,32 @@ display_caddy_config() {
   echo
 }
 
+display_github_secrets() {
+  local deploy_key_path="$1"
+  if [ -z "${deploy_key_path}" ]; then
+    echo "Критическая ошибка: путь к ключу деплоя не был определен." >&2
+    return
+  fi
+
+  local ssh_host
+  ssh_host=$(_get_server_public_ip)
+
+  echo
+  echo "====================== Секреты для GitHub Actions ======================"
+  echo "Добавьте следующие секреты в настройки вашего репозитория на GitHub:"
+  echo "--------------------------------------------------------------------"
+  echo "SSH_HOST: ${ssh_host}"
+  echo "SSH_USER: ${DEPLOY_USER}"
+  echo "CLEANUP_COMMAND: ${CLEANUP_COMMAND_VAR}"
+
+  echo "---------------------- SSH_PRIVATE_KEY (КРИТИЧЕСКИ ВАЖНО!) ------------------"
+  echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
+  echo "ВАЖНО: Секрет в GitHub должен содержать пустую строку после 'END PRIVATE KEY'."
+  echo "Скрипт выводит ее автоматически, просто убедитесь, что скопировали всё."
+  echo "===================================================================="
+  cat "${deploy_key_path}"
+}
+
 print_summary() {
   echo
   echo "===================================================================="
@@ -362,6 +394,8 @@ print_summary() {
   echo "===================================================================="
   echo
   echo "Следующие шаги:"
+
+  display_github_secrets "${DEPLOY_KEY_PATH}"
 
   display_caddy_config
 

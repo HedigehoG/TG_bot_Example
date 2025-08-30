@@ -38,22 +38,33 @@
 Это самый важный шаг, который выполняется **только один раз**.
 
 1.  Подключитесь к вашему серверу по SSH (пока что под `root` или пользователем с `sudo`).
-2.  Склонируйте ваш репозиторий на сервер:
+
+2.  Запустите скрипт настройки одной командой.
+
+    #### Вариант А: Интерактивный режим (рекомендуется для первого раза)
+    Вам нужно передать только `GITHUB_REPOSITORY`. Скрипт задаст остальные вопросы.
     ```bash
-    git clone https://github.com/your-username/your-repo.git
+    sudo GITHUB_REPOSITORY="your-username/your-repo" \
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/your-username/your-repo/main/deploy/bootstrap-server-custom.sh)"
     ```
-3.  Перейдите в директорию со скриптом:
+
+    #### Вариант Б: Неинтерактивный (автоматический) режим
+    Вы можете передать все параметры через переменные окружения для полностью автоматической установки.
     ```bash
-    cd your-repo/deploy
+    sudo GITHUB_REPOSITORY="your-username/your-repo" \
+         BOT_NAME="my_cool_bot" \
+         DEPLOY_USER="bot_runner" \
+         WEBHOOK_HOST_URL="https://bot.example.com" \
+         HOST_PORT="8001" \
+         bash -c "$(curl -fsSL https://raw.githubusercontent.com/your-username/your-repo/main/deploy/bootstrap-server-custom.sh)"
     ```
-4.  Запустите интерактивный скрипт настройки. **Обязательно** передайте ему переменную `GITHUB_REPOSITORY`:
-    ```bash
-    sudo GITHUB_REPOSITORY="your-username/your-repo" ./bootstrap-server-custom.sh
-    ```
-    Скрипт задаст вам несколько вопросов:
-    - **Имя бота**: Используется для создания пользователя и именования контейнера (например, `my_cool_bot`).
-    - **URL для вебхука**: Ваш публичный домен (например, `https://bot.example.com`). Скрипт проверит, что домен резолвится в IP вашего сервера.
-    - **Внешний порт**: Порт на сервере, который будет слушать бот (например, `8001`).
+
+    **Описание переменных:**
+    - `GITHUB_REPOSITORY` (обязательно): Путь к вашему репозиторию (`user/repo`).
+    - `BOT_NAME` (опционально): Имя для бота и контейнера (по умолчанию: `bot_main`).
+    - `DEPLOY_USER` (опционально): Имя пользователя на сервере (по умолчанию: значение `BOT_NAME`).
+    - `WEBHOOK_HOST_URL` (опционально): Публичный URL для вебхука. Если не указан, скрипт спросит его.
+    - `HOST_PORT` (опционально): Внешний порт на сервере (по умолчанию: `8001`).
 
 После выполнения скрипт выведет данные, которые понадобятся на следующем шаге.
 
