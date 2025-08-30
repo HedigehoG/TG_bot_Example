@@ -62,7 +62,7 @@ main() {
   echo "Очистка системных конфигураций..."
   rm -f "/etc/ssh/sshd_config.d/99-disable-password-auth.conf"
   rm -f "/etc/sudoers.d/99-${user_to_delete}-cleanup"
-  rm -f "/usr/local/bin/cleanup-${user_to_delete}" # Удаляем сам скрипт очистки
+  rm -f -- "$0" # Удаляем сам скрипт очистки
 
   echo "Перезапуск SSH сервиса..."
   systemctl restart sshd

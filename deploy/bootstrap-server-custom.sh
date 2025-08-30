@@ -25,6 +25,7 @@ DEPLOY_USER=""
 WORK_DIR=""
 WEBHOOK_HOST_URL=""
 HOST_PORT=""
+CLEANUP_COMMAND_VAR=""
 
 
 check_root() {
@@ -154,7 +155,7 @@ display_github_secrets() {
   echo "--------------------------------------------------------------------"
   echo "SSH_HOST: ${ssh_host}"
   echo "SSH_USER: ${DEPLOY_USER}"
-  echo "CLEANUP_COMMAND: sudo /usr/local/bin/cleanup-${DEPLOY_USER} ${DEPLOY_USER}"
+  echo "CLEANUP_COMMAND: ${CLEANUP_COMMAND_VAR}"
 
   echo "---------------------- SSH_PRIVATE_KEY (КРИТИЧЕСКИ ВАЖНО!) ------------------"
   echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
@@ -225,16 +226,18 @@ setup_cleanup_script() {
     exit 1
   fi
 
-  local cleanup_script_dest_path="/usr/local/bin/cleanup-${DEPLOY_USER}"
+  local cleanup_script_dest_path="${WORK_DIR}/cleanup-server.sh"
   cp "${cleanup_script_source_path}" "${cleanup_script_dest_path}"
   chmod +x "${cleanup_script_dest_path}"
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${cleanup_script_dest_path}"
 
   # Настройка sudo для безопасного запуска скрипта очистки из GitHub Actions
   local sudoers_file="/etc/sudoers.d/99-${DEPLOY_USER}-cleanup"
   echo "Предоставление прав на выполнение скрипта очистки через sudo..."
   echo "${DEPLOY_USER} ALL=(ALL) NOPASSWD: ${cleanup_script_dest_path} ${DEPLOY_USER}" > "${sudoers_file}"
   chmod 0440 "${sudoers_file}"
-  echo "Скрипт очистки настроен. Команда для запуска добавлена в вывод секретов."
+  CLEANUP_COMMAND_VAR="sudo ${cleanup_script_dest_path} ${DEPLOY_USER}"
+  echo "Скрипт очистки настроен и размещен в ${cleanup_script_dest_path}."
 }
 
 create_env_file() {
