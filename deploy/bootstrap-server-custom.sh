@@ -214,9 +214,11 @@ setup_deploy_user() {
 
 setup_cleanup_script() {
   echo "Настройка скрипта для удаления..."
-  local cleanup_script_source_path
-  # Определяем путь к исходному скрипту очистки относительно текущего скрипта
-  cleanup_script_source_path="$(dirname "$0")/cleanup-server.sh"
+  # Определяем абсолютный путь к директории, где находится текущий скрипт.
+  # Это самый надежный способ, который работает независимо от того, как и откуда был запущен скрипт.
+  local script_dir
+  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+  local cleanup_script_source_path="${script_dir}/cleanup-server.sh"
 
   if [ ! -f "${cleanup_script_source_path}" ]; then
     echo "Ошибка: Скрипт очистки 'cleanup-server.sh' не найден в директории 'deploy'." >&2
