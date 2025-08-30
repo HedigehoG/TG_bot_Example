@@ -7,7 +7,8 @@ import logging
 load_dotenv()
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update, Message
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Message, Update
 from aiogram.filters import Command
 
 # Configure logging
@@ -22,15 +23,22 @@ LISTEN_HOST = os.getenv('HOST', '0.0.0.0')
 # константой, но мы берем его из .env для единообразия.
 # Внешний порт настраивается через проброс портов в Docker.
 LISTEN_PORT = int(os.getenv('LISTEN_PORT', '8080'))
+# Секретный токен для верификации вебхуков. Для простоты можно использовать токен бота.
+# В продакшене лучше сгенерировать отдельный секрет и добавить в .env.
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', BOT_TOKEN)
+
 if not BOT_TOKEN or not WEBHOOK_HOST:
     raise SystemExit('Please set BOT_TOKEN and WEBHOOK_HOST in your environment (.env file)')
+if not WEBHOOK_HOST.startswith("https://"):
+    logging.warning("WEBHOOK_HOST does not start with https://. Telegram requires HTTPS for webhooks.")
 
 # Используем простой и статический путь. Маршрутизация будет осуществляться через поддомен.
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+# Убираем возможное / в конце, чтобы избежать двойного слеша //
+WEBHOOK_URL = f"{WEBHOOK_HOST.rstrip('/')}{WEBHOOK_PATH}"
 
-bot = Bot(BOT_TOKEN)
-dp = Dispatcher()
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 
 @dp.message(Command(commands=['start']))
 async def cmd_start(message: Message):
@@ -43,6 +51,12 @@ async def echo(message: Message):
 
 async def handle(request: web.Request) -> web.Response:
     try:
+        # Проверяем секретный токен, который Telegram передает в заголовке
+        secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret_token != WEBHOOK_SECRET:
+            logging.warning("Wrong secret token received!")
+            return web.Response(status=403)
+
         bot: Bot = request.app['bot']
         update_data = await request.json()
         update = Update(**update_data)
@@ -54,7 +68,10 @@ async def handle(request: web.Request) -> web.Response:
         return web.Response(status=200, text="ok")
 
 async def on_startup(app: web.Application):
-    await bot.set_webhook(WEBHOOK_URL)
+    # При запуске бота удаляем старые, неотвеченные апдейты,
+    # и устанавливаем вебхук с секретным токеном.
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
     app['bot'] = bot
     logging.info('Webhook set to %s', WEBHOOK_URL)
 
@@ -63,9 +80,11 @@ async def health_check(request):
     return web.Response(text="OK")
 
 async def on_shutdown(app: web.Application):
+    logging.info("Gracefully shutting down...")
     bot = app.get('bot')
     if bot:
         await bot.delete_webhook()
+        await dp.storage.close()
         await bot.session.close()
 
 app = web.Application()

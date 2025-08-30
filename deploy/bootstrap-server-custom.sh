@@ -98,9 +98,9 @@ install_docker() {
 
 display_github_secrets() {
   local deploy_key_path="$1"
-  # Пытаемся получить публичный IPv4. Если не вышло, ищем первый IPv4 в выводе hostname -I.
+  # Пытаемся получить публичный IPv4 с таймаутом. Если не вышло, ищем первый IPv4 в выводе hostname -I.
   local ssh_host
-  ssh_host=$(curl -4s ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
+  ssh_host=$(curl -4s --max-time 5 ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
 
   echo
   echo "====================== Секреты для GitHub Actions ======================"
@@ -108,12 +108,13 @@ display_github_secrets() {
   echo "--------------------------------------------------------------------"
   echo "SSH_HOST: ${ssh_host}"
   echo "SSH_USER: ${DEPLOY_USER}"
+  echo "WORK_DIR: ${WORK_DIR}"
+
   echo "---------------------- SSH_PRIVATE_KEY (ВАЖНО!) ------------------"
   echo "Скопируйте всё, что находится между линиями ==, включая 'BEGIN' и 'END'."
   echo
   echo "===================================================================="
   cat "${deploy_key_path}"
-  echo
   echo "===================================================================="
   # Приватный ключ остается на сервере в /home/${DEPLOY_USER}/.ssh/ на случай,
   # если потребуется его скопировать снова.
@@ -139,14 +140,16 @@ setup_deploy_user() {
   chown "${DEPLOY_USER}:${DEPLOY_USER}" "${ssh_dir}/authorized_keys"
   echo "Создана директория SSH для пользователя ${DEPLOY_USER}."
 
-  # Включаем аутентификацию по ключу и отключаем по паролю в sshd
-  echo "Настройка SSH сервера для безопасного доступа..."
-  sed -i -E 's/^\s*#?\s*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-  sed -i -E 's/^\s*#?\s*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-  # Добавляем строку, если она вдруг отсутствует
-  grep -qE "^\s*PubkeyAuthentication" /etc/ssh/sshd_config || echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+  # Настраиваем SSH-сервер для безопасного доступа, отключая вход по паролю.
+  # Мы используем drop-in файл конфигурации, чтобы не изменять основной sshd_config.
+  # Это более безопасный и современный подход, который не затрагивает системные файлы.
+  echo "Настройка SSH сервера для безопасного доступа (отключение входа по паролю)..."
+  local ssh_custom_config="/etc/ssh/sshd_config.d/99-disable-password-auth.conf"
+  mkdir -p /etc/ssh/sshd_config.d
+  echo "PasswordAuthentication no" > "${ssh_custom_config}"
+  echo "PubkeyAuthentication yes" >> "${ssh_custom_config}"
   systemctl restart sshd
-  echo "SSH сервер перенастроен для аутентификации по публичному ключу."
+  echo "SSH сервер перенастроен: вход по паролю отключен, вход по ключу разрешен."
 
   # Генерация и настройка ключа для деплоя
   echo "Генерация ключа для деплоя (формат PEM для GitHub Actions)..."
@@ -172,6 +175,9 @@ create_env_file() {
   cat > "${env_file}" <<ENV
 # Этот файл содержит переменные окружения для вашего бота.
 # BOT_TOKEN будет автоматически добавлен во время деплоя из GitHub Secrets.
+
+# Имя бота, используется для docker-compose (например, для имени контейнера).
+BOT_NAME=${BOT_NAME}
 
 # Публичный URL, на который Telegram будет отправлять обновления.
 WEBHOOK_HOST=${WEBHOOK_HOST_URL}
@@ -205,6 +211,9 @@ create_docker_compose_file() {
 services:
   bot:
     # Имя образа будет передаваться через переменную окружения BOT_IMAGE во время деплоя.
+    # Явно задаем имя контейнера, чтобы оно было предсказуемым (например, 'bot_main'),
+    # вместо автоматически сгенерированного. Значение берется из .env файла.
+    container_name: \${BOT_NAME}
     # Здесь мы указываем значение по умолчанию для локальных запусков.
     image: \${BOT_IMAGE:-${bot_image}}
     env_file:

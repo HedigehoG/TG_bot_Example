@@ -1,11 +1,11 @@
-name: Build, Deploy and Manage Bot
+name: Build and Deploy Bot
 
 on:
   # 1. Позволяет запускать воркфлоу вручную из вкладки Actions в GitHub
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform'
+        description: 'Действие для выполнения'
         required: true
         default: 'build_and_deploy'
         type: choice
@@ -14,15 +14,17 @@ on:
           - build_only
           - deploy_only
           - stop
-      image_tag:
-        description: 'Image tag to deploy (for deploy_only action)'
-        required: false
-        default: 'latest'
 
   # 2. Автоматически запускает сборку и деплой при пуше в `main`
   push:
     branches:
       - main
+
+# Ограничиваем права, которые есть у временного токена GITHUB_TOKEN.
+# Это лучшая практика для безопасности, предотвращающая нежелательные действия.
+permissions:
+  contents: read      # Нужно для чтения кода
+  packages: write     # Нужно для публикации образа в GHCR
 
 jobs:
   build:
@@ -35,10 +37,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'build_and_deploy' || github.event.inputs.action == 'build_only'))
     runs-on: ubuntu-latest
     outputs:
-      image_tag_sha: ${{ steps.meta.outputs.version }}
-    permissions:
-      contents: read
-      packages: write
+      image_tags: ${{ steps.meta.outputs.tags }}
 
     steps:
       - name: Checkout repository
@@ -47,7 +46,7 @@ jobs:
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ghcr.io # GitHub Container Registry
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -56,17 +55,23 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # Создаем два тега:
+          # 1. 'latest' для пушей в основную ветку (main)
+          # 2. Короткий хеш коммита (например, 1234abcd) для уникальной идентификации каждой сборки
           tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }} # Используем теги из предыдущего шага
           labels: ${{ steps.meta.outputs.labels }}
+          # Включаем кэширование слоев Docker для ускорения последующих сборок
+          cache-from: type=gha,scope=${{ github.workflow }}
+          cache-to: type=gha,scope=${{ github.workflow }},mode=max
 
   deploy:
     name: Deploy to Server
@@ -90,28 +95,26 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-
-            if [[ "${{ github.event.inputs.action }}" == "deploy_only" ]]; then
-              IMAGE_TAG="${{ github.event.inputs.image_tag }}"
-            else
-              IMAGE_TAG="${{ needs.build.outputs.image_tag_sha }}"
-            fi
-
-            # ghcr.io требует, чтобы имена репозиториев были в нижнем регистре.
-            REPO_LOWERCASE=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-            export BOT_IMAGE="ghcr.io/$REPO_LOWERCASE:$IMAGE_TAG"
-
+            cd ${{ secrets.WORK_DIR }}
+            
+            # Определяем, какой образ разворачивать.
+            # Для 'deploy_only' берем 'latest', для остальных - конкретный тег сборки.
+            # Примечание: для 'deploy_only' можно добавить input для указания конкретного тега.
+            IMAGE_TAGS="${{ needs.build.outputs.image_tags || format('ghcr.io/{0}:latest', github.repository) }}"
+            # Берем первый тег из списка (это будет хеш коммита, если он есть, или latest)
+            export BOT_IMAGE=$(echo "$IMAGE_TAGS" | head -n 1)
+            
             echo "--- Deploying image: ${BOT_IMAGE}"
 
             echo "--- Updating .env file with BOT_TOKEN"
-            sed -i '/^#\?BOT_TOKEN=/d' .env
-            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+            # Надежно обновляем или добавляем BOT_TOKEN
+            grep -qF 'BOT_TOKEN=' .env && sed -i 's|BOT_TOKEN=.*|BOT_TOKEN=${{ secrets.BOT_TOKEN }}|' .env || echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
 
             echo "--- Pulling new image"
             docker compose pull
 
             echo "--- Restarting container"
-            docker compose up -d --force-recreate
+            docker compose up -d --force-recreate --remove-orphans
 
             echo "--- Pruning old images"
             docker image prune -af
@@ -130,6 +133,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
+            cd ${{ secrets.WORK_DIR }}
             echo "--- Stopping bot..."
             docker compose down
             echo "--- Bot stopped."
