@@ -36,15 +36,13 @@ if [ -n "${WEBHOOK_HOST}" ]; then
     
     echo "Entrypoint: Waiting for external DNS propagation for '${EXTERNAL_TARGET_HOST}' (checking via ${PUBLIC_DNS})..."
     start_time=$(date +%s)
-    while ! host "${EXTERNAL_TARGET_HOST}" "${PUBLIC_DNS}" > /dev/null 2>&1; do
+    # Используем `+nodnssec`, чтобы избежать ошибок SERVFAIL с DuckDNS
+    while ! host +nodnssec "${EXTERNAL_TARGET_HOST}" "${PUBLIC_DNS}" > /dev/null 2>&1; do
         current_time=$(date +%s)
         elapsed_time=$((current_time - start_time))
 
         if [ ${elapsed_time} -ge ${WAIT_TIMEOUT} ]; then
             echo "Entrypoint: Timeout! External DNS for '${EXTERNAL_TARGET_HOST}' not ready after ${WAIT_TIMEOUT} seconds."
-            echo "--- Diagnostic Info ---"
-            host "${EXTERNAL_TARGET_HOST}" "${PUBLIC_DNS}" || true
-            echo "-----------------------"
             exit 1
         fi
 
@@ -52,8 +50,6 @@ if [ -n "${WEBHOOK_HOST}" ]; then
         sleep 5
     done
     echo "Entrypoint: External DNS for '${EXTERNAL_TARGET_HOST}' has propagated."
-else
-    echo "Entrypoint: WARNING - WEBHOOK_HOST is not set, skipping external DNS check."
 fi
 
 echo "Entrypoint: All checks passed. Starting application..."
