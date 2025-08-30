@@ -36,10 +36,38 @@ check_root() {
   fi
 }
 
+check_dependencies() {
+    echo "Проверка системных зависимостей..."
+    local missing_packages=()
+    # sudo необходимо для создания sudoers файла для скрипта очистки
+    if ! command -v sudo >/dev/null 2>&1; then
+        missing_packages+=("sudo")
+    fi
+    # curl используется для загрузки скриптов и ключей
+    if ! command -v curl >/dev/null 2>&1; then
+        missing_packages+=("curl")
+    fi
+    # host (из dnsutils) используется для проверки DNS
+    if ! command -v host >/dev/null 2>&1; then
+        missing_packages+=("dnsutils")
+    fi
+    # gpg используется для установки ключа Docker-репозитория
+    if ! command -v gpg >/dev/null 2>&1; then
+        missing_packages+=("gnupg")
+    fi
+
+    if [ ${#missing_packages[@]} -gt 0 ]; then
+        echo "Обнаружены отсутствующие пакеты: ${missing_packages[*]}"
+        echo "Запускаем apt-get update..."
+        apt-get -qq update
+        echo "Установка пакетов..."
+        apt-get -qq install -y "${missing_packages[@]}"
+        echo "Зависимости установлены."
+    fi
+}
+
  _get_server_public_ip() {
   # Пытаемся получить публичный IPv4 с таймаутом. Если не вышло, ищем первый IPv4 в выводе hostname -I.
-  # Команда `host` используется для проверки DNS, поэтому она должна быть доступна.
-  command -v host >/dev/null 2>&1 || { echo "Установка dnsutils (для команды 'host')..."; apt-get -qq update && apt-get -qq install -y dnsutils; }
   curl -4s --max-time 5 ifconfig.me || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}'
 }
 
@@ -100,10 +128,8 @@ gather_interactive_inputs() {
   echo
   echo "--- Настройка конфигурации ---"
 
-  local bot_name_input
-  read -p "Введите имя для вашего бота [${BOT_NAME_DEFAULT}]: " bot_name_input
-  BOT_NAME=${bot_name_input:-${BOT_NAME_DEFAULT}}
   if [ -z "${BOT_NAME}" ]; then
+    local bot_name_input
     read -p "Введите имя для вашего бота [${BOT_NAME_DEFAULT}]: " bot_name_input
     BOT_NAME=${bot_name_input:-${BOT_NAME_DEFAULT}}
   else
@@ -111,6 +137,7 @@ gather_interactive_inputs() {
   fi
 
   if [ -z "${DEPLOY_USER}" ]; then
+    local deploy_user_input
     read -p "Введите имя пользователя для деплоя (будет создан на сервере) [${BOT_NAME}]: " deploy_user_input
     DEPLOY_USER=${deploy_user_input:-${BOT_NAME}}
   else
@@ -148,6 +175,7 @@ gather_interactive_inputs() {
   fi
 
   if [ -z "${HOST_PORT}" ]; then
+    local host_port_input
     read -p "Введите внешний порт для бота (на хосте) [${HOST_PORT_DEFAULT}]: " host_port_input
     HOST_PORT=${host_port_input:-${HOST_PORT_DEFAULT}}
   else
@@ -162,8 +190,9 @@ install_docker() {
   fi
 
   echo "Установка Docker..."
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg lsb-release
+  # Зависимости curl и gnupg устанавливаются централизованно в check_dependencies
+  apt-get -qq update
+  apt-get -qq install -y ca-certificates lsb-release
 
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -172,8 +201,8 @@ install_docker() {
   # Примечание: Скрипт адаптирован для Ubuntu. Для других Debian-based систем 'ubuntu' может потребоваться заменить на 'debian'.
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
 
-  apt-get update
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  apt-get -qq update
+  apt-get -qq install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable --now docker
   echo "Docker успешно установлен и запущен."
 }
@@ -238,6 +267,8 @@ setup_cleanup_script() {
   chown "${DEPLOY_USER}:${DEPLOY_USER}" "${cleanup_script_dest_path}"
 
   # Настройка sudo для безопасного запуска скрипта очистки из GitHub Actions
+  # Убедимся, что директория для drop-in файлов sudo существует.
+  mkdir -p /etc/sudoers.d
   local sudoers_file="/etc/sudoers.d/99-${DEPLOY_USER}-cleanup"
   echo "Предоставление прав на выполнение скрипта очистки через sudo..."
   echo "${DEPLOY_USER} ALL=(ALL) NOPASSWD: ${cleanup_script_dest_path} ${DEPLOY_USER}" > "${sudoers_file}"
@@ -392,23 +423,26 @@ print_summary() {
   echo "===================================================================="
   echo "Первоначальная настройка сервера завершена!"
   echo "===================================================================="
-  echo
-  echo "Следующие шаги:"
 
   display_github_secrets "${DEPLOY_KEY_PATH}"
 
+  echo
+  echo "--- Следующие шаги ---"
+  echo "1. Перейдите в настройки вашего репозитория на GitHub и добавьте секреты:"
+  echo "   (Settings -> Secrets and variables -> Actions -> New repository secret)"
+  echo "   - Добавьте все секреты, показанные выше (\`SSH_HOST\`, \`SSH_USER\`, \`CLEANUP_COMMAND\`, \`SSH_PRIVATE_KEY\`)."
+  echo "   - Добавьте еще один, самый важный секрет: \`BOT_TOKEN\` (токен от @BotFather)."
+
   display_caddy_config
 
-  echo "1. Добавьте секреты, показанные выше, в настройки вашего репозитория GitHub."
-  echo "   (Settings -> Secrets and variables -> Actions -> New repository secret)"
-  echo "2. ВАЖНО: Добавьте следующие секреты: 'BOT_TOKEN' (токен от @BotFather) и 'CLEANUP_COMMAND' (команда для удаления, выведена выше)."
-  echo "3. Проверьте и при необходимости отредактируйте файл ${WORK_DIR}/.env на сервере."
-  echo "4. Отправьте изменения в ветку 'main' (или другую основную ветку), чтобы запустить деплой."
+  echo "2. Проверьте и при необходимости отредактируйте файл ${WORK_DIR}/.env на сервере."
+  echo "3. Отправьте изменения в ветку 'main' (или другую основную ветку), чтобы запустить деплой."
 }
 
 main() {
   check_root
   validate_input
+  check_dependencies
 
   # Собираем все интерактивные данные от пользователя в самом начале
   gather_interactive_inputs
