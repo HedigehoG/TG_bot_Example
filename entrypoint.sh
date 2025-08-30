@@ -26,7 +26,7 @@ wait_for_dns() {
 
         echo "Entrypoint: Host '${target_host}' not yet resolvable, retrying in 5 seconds..."
         sleep 5
-    fi
+    done
     echo "Entrypoint: Host '${target_host}' is resolvable."
 }
 
