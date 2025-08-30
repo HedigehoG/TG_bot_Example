@@ -1,42 +1,62 @@
 #!/bin/sh
 set -e # Выходить немедленно, если команда завершается с ошибкой.
 
-#
 # Скрипт-обертка для ожидания доступности сети перед запуском основного приложения.
-#
+# Шаг 1: Ожидает, пока контейнер сможет разрешать внешние DNS-имена (проверка внутренней сети).
+# Шаг 2: Ожидает, пока DNS-запись самого бота станет видна через публичный DNS-сервер (проверка внешней DNS-пропагации).
 
-# Хост, который мы будем проверять. api.telegram.org - идеальный кандидат.
-TARGET_HOST="api.telegram.org"
-WAIT_TIMEOUT=60 # Максимальное время ожидания в секундах.
+INTERNAL_TARGET="api.telegram.org"
+PUBLIC_DNS="8.8.8.8" # Google's Public DNS
+WAIT_TIMEOUT=300 # 5 минут - максимальное время ожидания для каждого шага.
 
-echo "Entrypoint: Waiting for network to be ready..."
+# --- Шаг 1: Ожидание готовности внутренней сети ---
+echo "Entrypoint: Waiting for internal network to be ready (checking '${INTERNAL_TARGET}')..."
+start_time=$(date +%s)
+while ! host "${INTERNAL_TARGET}" > /dev/null 2>&1; do
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
 
-# Perform an initial check to see if we need to wait at all.
-if host "${TARGET_HOST}" > /dev/null 2>&1; then
-    echo "Entrypoint: Network is ready on the first attempt."
-else
-    echo "Entrypoint: Initial network check failed. Will start retrying..."
-    # Выводим диагностическую информацию при первой ошибке
-    echo "--- Diagnostic Info (first failure) ---"
-    host "${TARGET_HOST}" || true # Запускаем снова, чтобы увидеть ошибку. `|| true` предотвращает выход из-за `set -e`.
-    echo "---------------------------------------"
+    if [ ${elapsed_time} -ge ${WAIT_TIMEOUT} ]; then
+        echo "Entrypoint: Timeout! Internal network not ready after ${WAIT_TIMEOUT} seconds."
+        echo "--- Diagnostic Info ---"
+        host "${INTERNAL_TARGET}" || true
+        echo "-----------------------"
+        exit 1
+    fi
 
+    echo "Entrypoint: Internal network not ready, retrying in 2 seconds..."
+    sleep 2
+done
+echo "Entrypoint: Internal network is ready."
+
+# --- Шаг 2: Ожидание распространения внешней DNS-записи ---
+# WEBHOOK_HOST берется из .env файла, например: https://my-bot.example.com
+if [ -n "${WEBHOOK_HOST}" ]; then
+    EXTERNAL_TARGET_HOST=$(echo "${WEBHOOK_HOST}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
+    
+    echo "Entrypoint: Waiting for external DNS propagation for '${EXTERNAL_TARGET_HOST}' (checking via ${PUBLIC_DNS})..."
     start_time=$(date +%s)
-    while ! host "${TARGET_HOST}" > /dev/null 2>&1; do
+    while ! host "${EXTERNAL_TARGET_HOST}" "${PUBLIC_DNS}" > /dev/null 2>&1; do
         current_time=$(date +%s)
         elapsed_time=$((current_time - start_time))
 
         if [ ${elapsed_time} -ge ${WAIT_TIMEOUT} ]; then
-            echo "Entrypoint: Timeout! Network not ready after ${WAIT_TIMEOUT} seconds."
+            echo "Entrypoint: Timeout! External DNS for '${EXTERNAL_TARGET_HOST}' not ready after ${WAIT_TIMEOUT} seconds."
+            echo "--- Diagnostic Info ---"
+            host "${EXTERNAL_TARGET_HOST}" "${PUBLIC_DNS}" || true
+            echo "-----------------------"
             exit 1
         fi
 
-        echo "Entrypoint: Host ${TARGET_HOST} not yet resolvable, retrying in 2 seconds..."
-        sleep 2
+        echo "Entrypoint: Host '${EXTERNAL_TARGET_HOST}' not yet resolvable via public DNS, retrying in 5 seconds..."
+        sleep 5
     done
+    echo "Entrypoint: External DNS for '${EXTERNAL_TARGET_HOST}' has propagated."
+else
+    echo "Entrypoint: WARNING - WEBHOOK_HOST is not set, skipping external DNS check."
 fi
 
-echo "Entrypoint: Network is ready. Starting application..."
+echo "Entrypoint: All checks passed. Starting application..."
 # `exec "$@"` заменяет текущий процесс (скрипт) на команду, переданную в аргументах (CMD из Dockerfile).
 # Это позволяет приложению (python bot.py) корректно получать сигналы от Docker.
 exec "$@"
