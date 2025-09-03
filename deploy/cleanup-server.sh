@@ -51,8 +51,18 @@ main() {
 
   # 2. Удалить пользователя и его домашнюю директорию
   if id -u "${user_to_delete}" >/dev/null 2>&1; then
+    echo "Завершение всех сессий и процессов пользователя ${user_to_delete}..."
+    # Это необходимо, чтобы userdel не выдавал ошибку "user is currently used by process".
+    # Сначала пытаемся использовать loginctl, так как это более "чистый" способ.
+    if command -v loginctl >/dev/null 2>&1; then
+      loginctl terminate-user "${user_to_delete}" || true
+    else
+      # Если loginctl недоступен, используем pkill как запасной вариант.
+      pkill -u "${user_to_delete}" || true
+    fi
+    sleep 2 # Небольшая пауза, чтобы система успела обработать завершение процессов.
     echo "Удаление пользователя ${user_to_delete} и его домашней директории ${work_dir}..."
-    deluser --remove-home "${user_to_delete}"
+    deluser --remove-home "${user_to_delete}" # Теперь удаление должно пройти без ошибок.
     echo "Пользователь ${user_to_delete} удален."
   else
     echo "Пользователь ${user_to_delete} не найден, пропускаем удаление."

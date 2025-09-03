@@ -79,14 +79,22 @@ async def handle(request: web.Request) -> web.Response:
         return web.Response(status=200, text="ok")
 
 async def on_startup(app: web.Application):
-    # При запуске бота удаляем старые, неотвеченные апдейты,
-    # и устанавливаем вебхук с секретным токеном.
     app['bot'] = bot
-    logging.info("Attempting to set webhook...")
+    logging.info("Checking and setting webhook...")
     try:
+        # Получаем текущую информацию о вебхуке
+        webhook_info = await bot.get_webhook_info()
+
+        # Проверяем, совпадает ли URL с тем, что мы хотим установить
+        if webhook_info.url == WEBHOOK_URL:
+            logging.info("Webhook is already set to the correct URL: %s. No action needed.", WEBHOOK_URL)
+            return
+
+        # Если URL не совпадает или вебхук не установлен, то устанавливаем его.
+        logging.info("Webhook URL is incorrect ('%s') or not set. Setting new webhook to %s", webhook_info.url, WEBHOOK_URL)
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
-        logging.info('Webhook successfully set to %s', WEBHOOK_URL)
+        logging.info("Webhook successfully set to %s", WEBHOOK_URL)
     except Exception as e:
         logging.critical("Failed to set webhook on startup: %s", e, exc_info=True)
         # В данном случае, Docker/docker-compose перезапустит контейнер,
